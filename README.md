@@ -19,3 +19,5 @@ How is FOLH1 (PSMA) expression associated with pancreatic cancer biology, tumor 
 TCGA-PRAD
 How is FOLH1 (PSMA) expression associated with prostate cancer biology, tumor aggressiveness, clinical outcome, androgen receptor signaling, pathological progression, tumor microenvironment composition, immune infiltration, and molecular pathway activity in TCGA-PRAD?
 
+TCGA-PanCancer_FOLH1
+How does FOLH1 (PSMA) expression vary across human cancers, and how does prostate adenocarcinoma (TCGA-PRAD) compare with other tumor types and normal prostate tissue?
