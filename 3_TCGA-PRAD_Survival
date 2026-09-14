@@ -1,4 +1,5 @@
-# Survival analysis in TCGA-PRAD (501 patients: 10 deaths): Do patients with high vs low FOLH1 have different survival curves?
+# Survival analysis in TCGA-PRAD (501 patients: 10 deaths): 
+Do patients with high vs low FOLH1 have different survival curves?
 
 ## setup
 base_dir <- "C:/Users/Martina/Desktop/TCGA"
