@@ -793,3 +793,1894 @@ cat(
   )
 )
 cat("\n====================================\n")
+
+
+# ============================================================
+# 02_MTK25_DEG&BIOMARKERANALYSIS
+# DIFFERENTIAL EXPRESSION ANALYSIS & BIOMARKER ANALYSIS
+# ============================================================
+
+suppressPackageStartupMessages({
+  
+  library(DESeq2)
+  library(dplyr)
+  library(pheatmap)
+  library(tibble)
+  
+  library(org.Mm.eg.db)
+  library(AnnotationDbi)
+  
+})
+
+# ============================================================
+# ROOT DIRECTORY
+# ============================================================
+
+outdir <- file.path(
+  "C:/Users/Martina/Desktop/New folder/results",
+  "MTK25_analysis"
+)
+
+# ============================================================
+# LOAD OBJECTS FROM SCRIPT 1
+# ============================================================
+
+load(
+  file.path(
+    "C:/Users/Martina/Desktop/New folder/results",
+    "MTK25_analysis",
+    "MTK25_QC_PCA_objects.RData"
+  )
+)
+
+# ============================================================
+# DEG DIRECTORIES
+# ============================================================
+
+deg_dir <- file.path(
+  outdir,
+  "02_DEG"
+)
+
+deg_genotype_dir <- file.path(
+  deg_dir,
+  "01_Genotype_KO_vs_WT"
+)
+
+deg_treatment_dir <- file.path(
+  deg_dir,
+  "02_Treatment_MTK_vs_Ctrl"
+)
+
+deg_interaction_dir <- file.path(
+  deg_dir,
+  "03_Interaction"
+)
+
+deg_heatmap_dir <- file.path(
+  deg_dir,
+  "04_Heatmaps"
+)
+
+deg_trend_dir <- file.path(
+  deg_dir,
+  "05_TrendAnalysis"
+)
+
+dir.create(
+  deg_trend_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+
+ko_vs_wt_dir <- file.path(
+  deg_trend_dir,
+  "01_KO_vs_WT"
+)
+
+mtk_vs_ctrl_dir <- file.path(
+  deg_trend_dir,
+  "02_MTK_vs_Ctrl"
+)
+
+interaction_dir <- file.path(
+  deg_trend_dir,
+  "03_Interaction"
+)
+
+ctrl_dir <- file.path(
+  deg_trend_dir,
+  "04_KO_vs_WT_within_Ctrl"
+)
+
+mtk_dir <- file.path(
+  deg_trend_dir,
+  "05_KO_vs_WT_within_MTK"
+)
+
+wt_dir <- file.path(
+  deg_trend_dir,
+  "06_WT_MTK_vs_Ctrl"
+)
+
+ko_dir <- file.path(
+  deg_trend_dir,
+  "07_KO_MTK_vs_Ctrl"
+)
+
+dir.create(ko_vs_wt_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(mtk_vs_ctrl_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(interaction_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(ctrl_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(mtk_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(wt_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(ko_dir, recursive = TRUE, showWarnings = FALSE)
+
+dir.create(
+  deg_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+dir.create(
+  deg_genotype_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+dir.create(
+  deg_treatment_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+dir.create(
+  deg_interaction_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+dir.create(
+  deg_heatmap_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+# ============================================================
+# BIOMARKERS
+# ============================================================
+
+biomarker_dir <- file.path(
+  outdir,
+  "03_Biomarker_Analysis"
+)
+
+dir.create(
+  biomarker_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+biomarker_subdirs <- c(
+  
+  "KO_vs_WT",
+  
+  "MTK_vs_Ctrl",
+  
+  "Interaction",
+  
+  "KO_vs_WT_within_Ctrl",
+  
+  "KO_vs_WT_within_MTK",
+  
+  "WT_MTK_vs_Ctrl",
+  
+  "KO_MTK_vs_Ctrl"
+)
+
+for(d in biomarker_subdirs){
+  
+  dir.create(
+    file.path(
+      biomarker_dir,
+      d
+    ),
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+}
+
+# ============================================================
+# ANNOTATION
+# ============================================================
+
+anno <- AnnotationDbi::select(
+  
+  org.Mm.eg.db,
+  
+  keys = rownames(dds),
+  
+  keytype = "ENSEMBL",
+  
+  columns = c(
+    "SYMBOL",
+    "ENTREZID",
+    "GENENAME"
+  )
+  
+)
+
+anno <- anno[
+  !is.na(anno$ENSEMBL),
+]
+
+anno <- anno[
+  !duplicated(anno$ENSEMBL),
+]
+
+anno$SYMBOL_UPPER <- toupper(
+  anno$SYMBOL
+)
+
+write.csv(
+  
+  anno,
+  
+  file.path(
+    deg_dir,
+    "Gene_annotation_table.csv"
+  ),
+  
+  row.names = FALSE
+)
+
+# ============================================================
+# DEG FUNCTION
+# ============================================================
+
+run_deg <- function(
+    res,
+    comparison_name,
+    save_dir
+){
+  
+  res_df <- as.data.frame(res) %>%
+    rownames_to_column("ENSEMBL")
+  
+  res_df <- left_join(
+    res_df,
+    anno,
+    by = "ENSEMBL"
+  )
+  
+  res_df <- res_df %>%
+    
+    arrange(
+      padj,
+      desc(abs(log2FoldChange))
+    )
+  
+  res_df$Regulation <- dplyr::case_when(
+    
+    !is.na(res_df$padj) &
+      res_df$padj < 0.05 &
+      res_df$log2FoldChange > 0.58 ~
+      
+      "Up",
+    
+    !is.na(res_df$padj) &
+      res_df$padj < 0.05 &
+      res_df$log2FoldChange < -0.58 ~
+      
+      "Down",
+    
+    TRUE ~
+      
+      "NS"
+  )
+  
+  deg_sig <- res_df %>%
+    
+    filter(
+      !is.na(padj),
+      padj < 0.05,
+      abs(log2FoldChange) > 0.58
+    )
+  
+  deg_top10 <- res_df %>%
+    filter(!is.na(padj)) %>%
+    slice_head(n = 10)
+  
+  deg_top50 <- res_df %>%
+    filter(!is.na(padj)) %>%
+    slice_head(n = 50)
+  
+  deg_top100 <- res_df %>%
+    filter(!is.na(padj)) %>%
+    slice_head(n = 100)
+  
+  summary_df <- data.frame(
+    
+    Comparison = comparison_name,
+    
+    Significant =
+      nrow(deg_sig),
+    
+    Upregulated =
+      sum(
+        deg_sig$log2FoldChange > 0,
+        na.rm = TRUE
+      ),
+    
+    Downregulated =
+      sum(
+        deg_sig$log2FoldChange < 0,
+        na.rm = TRUE
+      )
+  )
+  
+  write.csv(
+    res_df,
+    file.path(
+      save_dir,
+      paste0(
+        comparison_name,
+        "_all_genes.csv"
+      )
+    ),
+    row.names = FALSE
+  )
+  
+  write.csv(
+    deg_sig,
+    file.path(
+      save_dir,
+      paste0(
+        comparison_name,
+        "_significant_DEGs.csv"
+      )
+    ),
+    row.names = FALSE
+  )
+  
+  write.csv(
+    deg_top10,
+    file.path(
+      save_dir,
+      paste0(
+        comparison_name,
+        "_Top10.csv"
+      )
+    ),
+    row.names = FALSE
+  )
+  
+  write.csv(
+    deg_top50,
+    file.path(
+      save_dir,
+      paste0(
+        comparison_name,
+        "_Top50.csv"
+      )
+    ),
+    row.names = FALSE
+  )
+  
+  write.csv(
+    deg_top100,
+    file.path(
+      save_dir,
+      paste0(
+        comparison_name,
+        "_Top100.csv"
+      )
+    ),
+    row.names = FALSE
+  )
+  
+  write.csv(
+    summary_df,
+    file.path(
+      save_dir,
+      paste0(
+        comparison_name,
+        "_summary.csv"
+      )
+    ),
+    row.names = FALSE
+  )
+  
+  return(
+    
+    list(
+      
+      all = res_df,
+      
+      sig = deg_sig,
+      
+      top10 = deg_top10,
+      
+      top50 = deg_top50,
+      
+      top100 = deg_top100,
+      
+      summary = summary_df
+    )
+  )
+}
+
+# ============================================================
+# KO vs WT
+# ============================================================
+
+res_genotype <- results(
+  
+  dds,
+  
+  name = "genotype_KO_vs_WT"
+)
+
+deg_genotype <- run_deg(
+  
+  res_genotype,
+  
+  "KO_vs_WT",
+  
+  deg_genotype_dir
+)
+
+# ============================================================
+# MTK vs CTRL
+# ============================================================
+
+res_treatment <- results(
+  
+  dds,
+  
+  name = "treatment_MTK_vs_Ctrl"
+)
+
+deg_treatment <- run_deg(
+  
+  res_treatment,
+  
+  "MTK_vs_Ctrl",
+  
+  deg_treatment_dir
+)
+
+# ============================================================
+# INTERACTION
+# ============================================================
+
+res_interaction <- results(
+  
+  dds,
+  
+  name = "genotypeKO.treatmentMTK"
+)
+
+deg_interaction <- run_deg(
+  
+  res_interaction,
+  
+  "Interaction",
+  
+  deg_interaction_dir
+)
+
+# ============================================================
+# DEG SUMMARY
+# ============================================================
+
+deg_summary <- bind_rows(
+  
+  deg_genotype$summary,
+  
+  deg_treatment$summary,
+  
+  deg_interaction$summary
+)
+
+write.csv(
+  
+  deg_summary,
+  
+  file.path(
+    deg_dir,
+    "MTK25_DEG_summary.csv"
+  ),
+  
+  row.names = FALSE
+)
+
+print(
+  deg_summary
+)
+
+# ============================================================
+# HEATMAP FUNCTION
+# ============================================================
+
+plot_deg_heatmap <- function(
+    gene_table,
+    vst_mat,
+    sample_info,
+    file_name,
+    title_text
+){
+  
+  genes_use <- intersect(
+    gene_table$ENSEMBL,
+    rownames(vst_mat)
+  )
+  
+  if(length(genes_use) < 2){
+    return(NULL)
+  }
+  
+  hm_mat <- vst_mat[
+    genes_use,
+    ,
+    drop = FALSE
+  ]
+  
+  gene_symbols <- gene_table$SYMBOL[
+    match(
+      rownames(hm_mat),
+      gene_table$ENSEMBL
+    )
+  ]
+  
+  gene_symbols[
+    is.na(gene_symbols) |
+      gene_symbols == ""
+  ] <- rownames(hm_mat)
+  
+  rownames(hm_mat) <- make.unique(
+    gene_symbols
+  )
+  
+  ann_col <- data.frame(
+    
+    Genotype =
+      sample_info$genotype,
+    
+    Treatment =
+      sample_info$treatment,
+    
+    Group =
+      sample_info$Group4,
+    
+    row.names =
+      rownames(sample_info)
+  )
+  
+  pheatmap(
+    
+    hm_mat,
+    
+    scale = "row",
+    
+    annotation_col =
+      ann_col,
+    
+    cluster_rows = TRUE,
+    
+    cluster_cols = TRUE,
+    
+    border_color = NA,
+    
+    show_rownames = TRUE,
+    
+    main = title_text,
+    
+    filename = file_name,
+    
+    width = 9,
+    
+    height = max(
+      6,
+      min(
+        16,
+        0.18 * nrow(hm_mat) + 4
+      )
+    )
+  )
+}
+
+# ============================================================
+# TOP50 SIGNIFICANT KO vs WT
+# ============================================================
+
+sig50_genotype <- deg_genotype$sig %>%
+  
+  arrange(
+    padj,
+    desc(abs(log2FoldChange))
+  ) %>%
+  
+  slice_head(n = 50)
+
+plot_deg_heatmap(
+  
+  sig50_genotype,
+  
+  vst_mat,
+  
+  sample_info,
+  
+  file.path(
+    deg_heatmap_dir,
+    "Heatmap_TOP50_significant_KO_vs_WT.png"
+  ),
+  
+  "Top 50 Significant DEGs: KO vs WT"
+)
+
+# ============================================================
+# TOP10 SIGNIFICANT KO vs WT
+# ============================================================
+
+top10_sig_genotype <- deg_genotype$sig %>%
+  
+  arrange(
+    padj,
+    desc(abs(log2FoldChange))
+  ) %>%
+  
+  slice_head(n = 10)
+
+plot_deg_heatmap(
+  
+  top10_sig_genotype,
+  
+  vst_mat,
+  
+  sample_info,
+  
+  file.path(
+    deg_heatmap_dir,
+    "Heatmap_TOP10_significant_KO_vs_WT.png"
+  ),
+  
+  "Top 10 Significant DEGs: KO vs WT"
+)
+
+# ============================================================
+# TOP10 MTK vs CTRL
+# ============================================================
+
+plot_deg_heatmap(
+  
+  deg_treatment$top10,
+  
+  vst_mat,
+  
+  sample_info,
+  
+  file.path(
+    deg_heatmap_dir,
+    "Heatmap_TOP10_MTK_vs_Ctrl.png"
+  ),
+  
+  "Top 10 DEGs: MTK vs Ctrl"
+)
+
+# ============================================================
+# TOP10 INTERACTION
+# ============================================================
+
+plot_deg_heatmap(
+  
+  deg_interaction$top10,
+  
+  vst_mat,
+  
+  sample_info,
+  
+  file.path(
+    deg_heatmap_dir,
+    "Heatmap_TOP10_Interaction.png"
+  ),
+  
+  "Top 10 DEGs: Interaction"
+)
+
+top10_ctrl <- res_ctrl_df %>%
+  
+  filter(!is.na(padj)) %>%
+  
+  arrange(
+    padj,
+    desc(abs(log2FoldChange))
+  ) %>%
+  
+  slice_head(n = 10)
+
+plot_deg_heatmap(
+  
+  top10_ctrl,
+  
+  vst_mat,
+  
+  sample_info,
+  
+  file.path(
+    deg_heatmap_dir,
+    "Heatmap_TOP10_KO_vs_WT_within_Ctrl.png"
+  ),
+  
+  "Top 10 DEGs: KO vs WT within Ctrl"
+)
+top10_mtk <- res_mtk_df %>%
+  
+  filter(!is.na(padj)) %>%
+  
+  arrange(
+    padj,
+    desc(abs(log2FoldChange))
+  ) %>%
+  
+  slice_head(n = 10)
+
+plot_deg_heatmap(
+  
+  top10_mtk,
+  
+  vst_mat,
+  
+  sample_info,
+  
+  file.path(
+    deg_heatmap_dir,
+    "Heatmap_TOP10_KO_vs_WT_within_MTK.png"
+  ),
+  
+  "Top 10 DEGs: KO vs WT within MTK"
+)
+top10_wt_treatment <- res_wt_df %>%
+  
+  filter(!is.na(padj)) %>%
+  
+  arrange(
+    padj,
+    desc(abs(log2FoldChange))
+  ) %>%
+  
+  slice_head(n = 10)
+
+plot_deg_heatmap(
+  
+  top10_wt_treatment,
+  
+  vst_mat,
+  
+  sample_info,
+  
+  file.path(
+    deg_heatmap_dir,
+    "Heatmap_TOP10_MTK_vs_Ctrl_within_WT.png"
+  ),
+  
+  "Top 10 DEGs: MTK vs Ctrl within WT"
+)
+top10_ko_treatment <- res_ko_df %>%
+  
+  filter(!is.na(padj)) %>%
+  
+  arrange(
+    padj,
+    desc(abs(log2FoldChange))
+  ) %>%
+  
+  slice_head(n = 10)
+
+plot_deg_heatmap(
+  
+  top10_ko_treatment,
+  
+  vst_mat,
+  
+  sample_info,
+  
+  file.path(
+    deg_heatmap_dir,
+    "Heatmap_TOP10_MTK_vs_Ctrl_within_KO.png"
+  ),
+  
+  "Top 10 DEGs: MTK vs Ctrl within KO"
+)
+sig_ctrl <- res_ctrl_df %>%
+  filter(
+    !is.na(padj),
+    padj < 0.05,
+    abs(log2FoldChange) > 0.58
+  )
+
+plot_deg_heatmap(
+  sig_ctrl,
+  vst_mat,
+  sample_info,
+  file.path(
+    deg_heatmap_dir,
+    "Heatmap_significant_KO_vs_WT_within_Ctrl.png"
+  ),
+  "Significant DEGs: KO vs WT within Ctrl"
+)
+
+# ============================================================
+# SAVE OBJECTS 
+# ============================================================
+
+save(
+  
+  anno,
+  
+  deg_genotype,
+  deg_treatment,
+  deg_interaction,
+  
+  res_ctrl_df,
+  res_mtk_df,
+  res_wt_df,
+  res_ko_df,
+  
+  sample_info,
+  vst_mat,
+  
+  file = file.path(
+    outdir,
+    "MTK25_DEG_objects.RData"
+  )
+)
+
+# ============================================================
+# BIOMARKER ANALYSIS
+# ============================================================
+
+run_biomarker_analysis <- function(
+    deg_table,
+    biomarkers,
+    comparison_name,
+    save_dir
+){
+  
+  dir.create(
+    save_dir,
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+  
+  biomarker_df <- deg_table %>%
+    
+    filter(
+      !is.na(SYMBOL)
+    ) %>%
+    
+    filter(
+      toupper(SYMBOL) %in%
+        toupper(biomarkers)
+    ) %>%
+    
+    filter(
+      !is.na(log2FoldChange)
+    ) %>%
+    
+    mutate(
+      
+      Trend = case_when(
+        
+        !is.na(pvalue) &
+          pvalue < 0.05 &
+          log2FoldChange > 0 ~
+          
+          "Trend Up",
+        
+        !is.na(pvalue) &
+          pvalue < 0.05 &
+          log2FoldChange < 0 ~
+          
+          "Trend Down",
+        
+        TRUE ~
+          
+          "No Trend"
+      )
+    ) %>%
+    
+    arrange(
+      pvalue
+    )
+  
+  write.csv(
+    
+    biomarker_df,
+    
+    file.path(
+      save_dir,
+      paste0(
+        comparison_name,
+        "_Biomarkers.csv"
+      )
+    ),
+    
+    row.names = FALSE
+  )
+  
+  trend_df <- biomarker_df %>%
+    
+    filter(
+      Trend != "No Trend"
+    )
+  
+  write.csv(
+    
+    trend_df,
+    
+    file.path(
+      save_dir,
+      paste0(
+        comparison_name,
+        "_TrendGenes.csv"
+      )
+    ),
+    
+    row.names = FALSE
+  )
+  
+  ranked_df <- biomarker_df %>%
+    
+    select(
+      SYMBOL,
+      log2FoldChange,
+      pvalue,
+      padj,
+      Trend
+    ) %>%
+    
+    arrange(
+      pvalue
+    )
+  
+  write.csv(
+    
+    ranked_df,
+    
+    file.path(
+      save_dir,
+      paste0(
+        comparison_name,
+        "_RankedBiomarkers.csv"
+      )
+    ),
+    
+    row.names = FALSE
+  )
+  
+  plot_df <- biomarker_df %>%
+    
+    mutate(
+      
+      Label = ifelse(
+        
+        Trend != "No Trend",
+        
+        paste0(
+          
+          SYMBOL,
+          
+          "\nFC=",
+          
+          round(
+            log2FoldChange,
+            2
+          ),
+          
+          "\nFDR=",
+          
+          signif(
+            padj,
+            3
+          )
+        ),
+        
+        ""
+      )
+    )
+  
+  p <- ggplot(
+    
+    plot_df,
+    
+    aes(
+      reorder(
+        SYMBOL,
+        log2FoldChange
+      ),
+      log2FoldChange,
+      fill = Trend
+    )
+  ) +
+    
+    geom_col(
+      width = 0.75
+    ) +
+    
+    coord_flip() +
+    
+    geom_hline(
+      yintercept = 0
+    ) +
+    
+    scale_fill_manual(
+      
+      values = c(
+        
+        "Trend Up" = "#D62728",
+        
+        "Trend Down" = "#1F77B4",
+        
+        "No Trend" = "grey75"
+      )
+    ) +
+    
+    theme_classic(
+      base_size = 14
+    ) +
+    
+    theme(
+      
+      legend.title =
+        element_blank(),
+      
+      plot.title =
+        element_text(
+          face = "bold",
+          hjust = 0.5
+        )
+    ) +
+    
+    labs(
+      
+      title = comparison_name,
+      
+      subtitle =
+        "Trend genes: p < 0.05",
+      
+      x = NULL,
+      
+      y = "log2 Fold Change"
+    )
+  
+  ggsave(
+    
+    file.path(
+      save_dir,
+      paste0(
+        comparison_name,
+        "_Biomarker_Trends.png"
+      )
+    ),
+    
+    p,
+    
+    width = 8,
+    
+    height = 10,
+    
+    dpi = 300
+  )
+  
+  summary_df <- data.frame(
+    
+    Comparison =
+      comparison_name,
+    
+    Biomarkers =
+      nrow(biomarker_df),
+    
+    TrendGenes =
+      nrow(trend_df),
+    
+    TrendUp =
+      sum(
+        biomarker_df$Trend ==
+          "Trend Up"
+      ),
+    
+    TrendDown =
+      sum(
+        biomarker_df$Trend ==
+          "Trend Down"
+      )
+  )
+  
+  write.csv(
+    
+    summary_df,
+    
+    file.path(
+      save_dir,
+      paste0(
+        comparison_name,
+        "_Summary.csv"
+      )
+    ),
+    
+    row.names = FALSE
+  )
+  
+  return(biomarker_df)
+}
+
+biomarker_KO_WT <- run_biomarker_analysis(
+  
+  deg_genotype$all,
+  
+  biomarkers,
+  
+  "KO_vs_WT",
+  
+  file.path(
+    biomarker_dir,
+    "KO_vs_WT"
+  )
+)
+
+biomarker_MTK_CTRL <- run_biomarker_analysis(
+  
+  deg_treatment$all,
+  
+  biomarkers,
+  
+  "MTK_vs_Ctrl",
+  
+  file.path(
+    biomarker_dir,
+    "MTK_vs_Ctrl"
+  )
+)
+
+biomarker_interaction <- run_biomarker_analysis(
+  
+  deg_interaction$all,
+  
+  biomarkers,
+  
+  "Interaction",
+  
+  file.path(
+    biomarker_dir,
+    "Interaction"
+  )
+)
+dds_ctrl <- dds[
+  ,
+  colData(dds)$treatment == "Ctrl"
+]
+
+design(dds_ctrl) <- ~ genotype
+
+dds_ctrl <- DESeq(dds_ctrl)
+
+res_ctrl <- results(
+  dds_ctrl,
+  contrast = c(
+    "genotype",
+    "KO",
+    "WT"
+  )
+)
+
+res_ctrl_df <- as.data.frame(
+  res_ctrl
+) %>%
+  rownames_to_column(
+    "ENSEMBL"
+  )
+
+res_ctrl_df <- left_join(
+  res_ctrl_df,
+  anno,
+  by = "ENSEMBL"
+)
+
+run_biomarker_analysis(
+  
+  res_ctrl_df,
+  
+  biomarkers,
+  
+  "KO_vs_WT_within_Ctrl",
+  
+  file.path(
+    biomarker_dir,
+    "KO_vs_WT_within_Ctrl"
+  )
+)
+dds_mtk <- dds[
+  ,
+  colData(dds)$treatment == "MTK"
+]
+
+design(dds_mtk) <- ~ genotype
+
+dds_mtk <- DESeq(dds_mtk)
+
+res_mtk <- results(
+  dds_mtk,
+  contrast = c(
+    "genotype",
+    "KO",
+    "WT"
+  )
+)
+
+res_mtk_df <- as.data.frame(
+  res_mtk
+) %>%
+  rownames_to_column(
+    "ENSEMBL"
+  )
+
+res_mtk_df <- left_join(
+  res_mtk_df,
+  anno,
+  by = "ENSEMBL"
+)
+
+run_biomarker_analysis(
+  
+  res_mtk_df,
+  
+  biomarkers,
+  
+  "KO_vs_WT_within_MTK",
+  
+  file.path(
+    biomarker_dir,
+    "KO_vs_WT_within_MTK"
+  )
+)
+dds_wt <- dds[
+  ,
+  colData(dds)$genotype == "WT"
+]
+
+design(dds_wt) <- ~ treatment
+
+dds_wt <- DESeq(dds_wt)
+
+res_wt <- results(
+  dds_wt,
+  contrast = c(
+    "treatment",
+    "MTK",
+    "Ctrl"
+  )
+)
+
+res_wt_df <- as.data.frame(
+  res_wt
+) %>%
+  rownames_to_column(
+    "ENSEMBL"
+  )
+
+res_wt_df <- left_join(
+  res_wt_df,
+  anno,
+  by = "ENSEMBL"
+)
+
+run_biomarker_analysis(
+  
+  res_wt_df,
+  
+  biomarkers,
+  
+  "WT_MTK_vs_Ctrl",
+  
+  file.path(
+    biomarker_dir,
+    "WT_MTK_vs_Ctrl"
+  )
+)
+dds_ko <- dds[
+  ,
+  colData(dds)$genotype == "KO"
+]
+
+design(dds_ko) <- ~ treatment
+
+dds_ko <- DESeq(dds_ko)
+
+res_ko <- results(
+  dds_ko,
+  contrast = c(
+    "treatment",
+    "MTK",
+    "Ctrl"
+  )
+)
+
+res_ko_df <- as.data.frame(
+  res_ko
+) %>%
+  rownames_to_column(
+    "ENSEMBL"
+  )
+
+res_ko_df <- left_join(
+  res_ko_df,
+  anno,
+  by = "ENSEMBL"
+)
+
+run_biomarker_analysis(
+  
+  res_ko_df,
+  
+  biomarkers,
+  
+  "KO_MTK_vs_Ctrl",
+  
+  file.path(
+    biomarker_dir,
+    "KO_MTK_vs_Ctrl"
+  )
+)
+
+# ============================================================
+# TREND BOXPLOTS
+# ============================================================
+
+run_biomarker_trend <- function(
+    deg_table,
+    biomarkers,
+    comparison_name,
+    output_dir
+){
+  
+  dir.create(
+    output_dir,
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+  
+  biomarker_df <- deg_table %>%
+    
+    filter(
+      !is.na(SYMBOL)
+    ) %>%
+    
+    filter(
+      toupper(SYMBOL) %in%
+        toupper(biomarkers)
+    ) %>%
+    
+    filter(
+      !is.na(log2FoldChange)
+    ) %>%
+    
+    mutate(
+      
+      Trend = case_when(
+        
+        !is.na(padj) &
+          padj < 0.05 &
+          log2FoldChange > 0 ~
+          
+          "Higher",
+        
+        !is.na(padj) &
+          padj < 0.05 &
+          log2FoldChange < 0 ~
+          
+          "Lower",
+        
+        TRUE ~
+          
+          "No Trend"
+      )
+    ) %>%
+    
+    arrange(
+      padj
+    )
+  
+  # ==========================================================
+  # EXPORT TABLES
+  # ==========================================================
+  
+  write.csv(
+    
+    biomarker_df,
+    
+    file.path(
+      output_dir,
+      paste0(
+        comparison_name,
+        "_Biomarkers.csv"
+      )
+    ),
+    
+    row.names = FALSE
+  )
+  
+  trend_only <- biomarker_df %>%
+    
+    filter(
+      Trend != "No Trend"
+    )
+  
+  write.csv(
+    
+    trend_only,
+    
+    file.path(
+      output_dir,
+      paste0(
+        comparison_name,
+        "_Trend_Genes.csv"
+      )
+    ),
+    
+    row.names = FALSE
+  )
+  
+  # ==========================================================
+  # BARPLOT
+  # ==========================================================
+  
+  plot_df <- biomarker_df %>%
+    
+    mutate(
+      
+      Label = ifelse(
+        
+        !is.na(padj) &
+          padj < 0.05,
+        
+        paste0(
+          "FDR=",
+          signif(
+            padj,
+            2
+          )
+        ),
+        
+        ""
+      )
+    )
+  
+  p_bar <- ggplot(
+    plot_df,
+    aes(
+      x = reorder(SYMBOL, log2FoldChange),
+      y = log2FoldChange,
+      fill = Trend
+    )
+  ) +
+    
+    geom_col(width = 0.75) +
+    
+    geom_text(
+      aes(label = Label),
+      hjust = ifelse(
+        plot_df$log2FoldChange > 0,
+        -0.1,
+        1.1
+      ),
+      size = 3
+    ) +
+    
+    coord_flip(clip = "off") +
+    
+    geom_hline(yintercept = 0) +
+    
+    scale_fill_manual(
+      values = c(
+        Higher = "#D62728",
+        Lower = "#1F77B4",
+        `No Trend` = "grey75"
+      )
+    ) +
+    
+    scale_y_continuous(
+      expand = expansion(
+        mult = c(0.15, 0.35)
+      )
+    ) +
+    
+    theme_classic() +
+    
+    labs(
+      title = paste0(
+        comparison_name,
+        " Biomarker Trends"
+      ),
+      x = NULL,
+      y = "log2 Fold Change"
+    ) +
+    
+    theme(
+      legend.title = element_blank(),
+      legend.position = "bottom",
+      plot.title = element_text(
+        hjust = 0.5,
+        face = "bold"
+      ),
+      plot.margin = margin(
+        t = 20,
+        r = 80,
+        b = 20,
+        l = 20
+      )
+    )
+  
+  plot_height <- max(
+    8,
+    nrow(plot_df) * 0.35
+  )
+  
+  ggsave(
+    file.path(
+      output_dir,
+      paste0(
+        comparison_name,
+        "_Biomarker_Trends.png"
+      )
+    ),
+    p_bar,
+    width = 12,
+    height = plot_height,
+    dpi = 300,
+    limitsize = FALSE
+  )
+  
+  # ==========================================================
+  # SCATTERPLOT
+  # ==========================================================
+  
+  p_scatter <- ggplot(
+    
+    biomarker_df,
+    
+    aes(
+      
+      log2FoldChange,
+      
+      -log10(
+        pmax(
+          pvalue,
+          1e-300
+        )
+      )
+    )
+    
+  ) +
+    
+    geom_point(
+      
+      aes(
+        colour = Trend
+      ),
+      
+      size = 3
+    ) +
+    
+    geom_hline(
+      
+      yintercept = -log10(0.05),
+      
+      linetype = 2
+    ) +
+  
+  geom_text_repel(
+    
+    data = subset(
+      plot_df,
+      Trend != "No Trend"
+    ),
+    
+    aes(
+      label = paste0(
+        SYMBOL,
+        "\nlog2FC=",
+        round(log2FoldChange, 2),
+        "\nFDR=",
+        ifelse(
+          is.na(padj),
+          "NA",
+          signif(padj, 3)
+        )
+      )
+    ),
+    
+    size = 3,
+    
+    direction = "y",
+    
+    box.padding = 0.5,
+    
+    point.padding = 0.3,
+    
+    segment.color = "grey50",
+    
+    max.overlaps = Inf
+  ) +
+    
+    scale_colour_manual(
+      
+      values = c(
+        
+        Higher = "#D62728",
+        
+        Lower = "#1F77B4",
+        
+        `No Trend` = "grey70"
+      )
+    ) +
+    
+    scale_y_continuous(
+      
+      expand = expansion(
+        mult = c(
+          0.05,
+          0.30
+        )
+      )
+    ) +
+    
+    theme_classic() +
+    
+    labs(
+      
+      title = paste0(
+        comparison_name,
+        " Biomarker Trends"
+      ),
+      
+      x = "log2 Fold Change",
+      
+      y = "-log10(p-value)"
+    )
+  
+  ggsave(
+    
+    file.path(
+      output_dir,
+      paste0(
+        comparison_name,
+        "_Biomarker_Trends_Scatter.png"
+      )
+    ),
+    
+    p_scatter,
+    
+    width = 10,
+    
+    height = 7,
+    
+    dpi = 300
+  )
+  
+  # ==========================================================
+  # SUMMARY
+  # ==========================================================
+  
+  summary_df <- data.frame(
+    
+    Comparison =
+      comparison_name,
+    
+    Tested =
+      nrow(biomarker_df),
+    
+    Significant =
+      sum(
+        biomarker_df$padj < 0.05,
+        na.rm = TRUE
+      ),
+    
+    Higher =
+      sum(
+        biomarker_df$Trend == "Higher"
+      ),
+    
+    Lower =
+      sum(
+        biomarker_df$Trend == "Lower"
+      )
+  )
+  
+  write.csv(
+    
+    summary_df,
+    
+    file.path(
+      output_dir,
+      paste0(
+        comparison_name,
+        "_Summary.csv"
+      )
+    ),
+    
+    row.names = FALSE
+  )
+  
+  return(
+    biomarker_df
+  )
+  
+}
+
+# ============================================================
+# EXECUTE TREND ANALYSIS
+# ============================================================
+
+biomarker_KOvsWT <- run_biomarker_trend(
+  
+  deg_genotype$all,
+  
+  biomarkers,
+  
+  "KO_vs_WT",
+  
+  ko_vs_wt_dir
+)
+
+biomarker_MTKvsCtrl <- run_biomarker_trend(
+  
+  deg_treatment$all,
+  
+  biomarkers,
+  
+  "MTK_vs_Ctrl",
+  
+  mtk_vs_ctrl_dir
+)
+
+biomarker_Interaction <- run_biomarker_trend(
+  
+  deg_interaction$all,
+  
+  biomarkers,
+  
+  "Interaction",
+  
+  interaction_dir
+)
+
+biomarker_KOvsWT_Ctrl <- run_biomarker_trend(
+  
+  res_ctrl_df,
+  
+  biomarkers,
+  
+  "KO_vs_WT_within_Ctrl",
+  
+  ctrl_dir
+)
+
+biomarker_KOvsWT_MTK <- run_biomarker_trend(
+  
+  res_mtk_df,
+  
+  biomarkers,
+  
+  "KO_vs_WT_within_MTK",
+  
+  mtk_dir
+)
+
+biomarker_WT_MTKvsCtrl <- run_biomarker_trend(
+  
+  res_wt_df,
+  
+  biomarkers,
+  
+  "WT_MTK_vs_Ctrl",
+  
+  wt_dir
+)
+
+biomarker_KO_MTKvsCtrl <- run_biomarker_trend(
+  
+  res_ko_df,
+  
+  biomarkers,
+  
+  "KO_MTK_vs_Ctrl",
+  
+  ko_dir
+)
+
+# ============================================================
+# FINAL REPORT
+# ============================================================
+
+trend_summary <- data.frame(
+  
+  Comparison = c(
+    
+    "KO_vs_WT",
+    
+    "MTK_vs_Ctrl",
+    
+    "Interaction",
+    
+    "KO_vs_WT_within_Ctrl",
+    
+    "KO_vs_WT_within_MTK",
+    
+    "WT_MTK_vs_Ctrl",
+    
+    "KO_MTK_vs_Ctrl"
+  ),
+  
+  Significant_Biomarkers = c(
+    
+    sum(
+      biomarker_KOvsWT$padj < 0.05,
+      na.rm = TRUE
+    ),
+    
+    sum(
+      biomarker_MTKvsCtrl$padj < 0.05,
+      na.rm = TRUE
+    ),
+    
+    sum(
+      biomarker_Interaction$padj < 0.05,
+      na.rm = TRUE
+    ),
+    
+    sum(
+      biomarker_KOvsWT_Ctrl$padj < 0.05,
+      na.rm = TRUE
+    ),
+    
+    sum(
+      biomarker_KOvsWT_MTK$padj < 0.05,
+      na.rm = TRUE
+    ),
+    
+    sum(
+      biomarker_WT_MTKvsCtrl$padj < 0.05,
+      na.rm = TRUE
+    ),
+    
+    sum(
+      biomarker_KO_MTKvsCtrl$padj < 0.05,
+      na.rm = TRUE
+    )
+  )
+)
+
+write.csv(
+  
+  trend_summary,
+  
+  file.path(
+    deg_trend_dir,
+    "Biomarker_Trend_Summary.csv"
+  ),
+  
+  row.names = FALSE
+)
+
+print(
+  trend_summary
+)
+
+cat("\n====================================\n")
+cat("BIOMARKER TREND ANALYSIS COMPLETED\n")
+cat("====================================\n")
+cat("Results saved in:\n")
+cat(deg_trend_dir)
+cat("\n====================================\n")
