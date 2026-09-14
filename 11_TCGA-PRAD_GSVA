@@ -1,0 +1,508 @@
+# GSVA ANALYSIS in TCGA-PRAD
+Is FOLH1 (PSMA) expression associated with immune infiltration programs in TCGA prostate adenocarcinoma (PRAD)?
+
+## set
+base_dir <- "C:/Users/Martina/Desktop/TCGA"
+out_dir <- file.path(base_dir, "results")
+dir.create(out_dir,showWarnings = FALSE, recursive = TRUE)
+
+## packages
+library(GSVA)
+library(GSEABase)
+library(MultiAssayExperiment)
+library(SummarizedExperiment)
+library(DESeq2)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(openxlsx)
+library(pheatmap)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(showtext)
+font_add("Arial", "C:/Windows/Fonts/arial.ttf")
+showtext_auto()
+
+## theme
+theme_set(theme_bw(base_size = 16) +
+    theme(
+      text = element_text(family = "Arial"),
+      panel.grid.major = element_line(linewidth = 0.3),
+      panel.grid.minor = element_blank()))
+
+## load & check raw data
+list.files(base_dir)
+rds_file <- file.path(base_dir,"TCGA-PRAD.rds")
+prad <- readRDS(rds_file)
+class(prad)
+cd <- as.data.frame(colData(prad))
+rd <- as.data.frame(rowData(prad))
+dim(prad)
+head(colnames(assay(prad)))
+table(colData(prad)$sample_type)
+head(rowData(prad))
+
+## verify FOLH1 presence
+ens <- gsub("\\..*", "", rd$gene_id)
+symbols <- mapIds(
+  org.Hs.eg.db,
+  keys = ens,
+  column = "SYMBOL",
+  keytype = "ENSEMBL",
+  multiVals = "first"
+)
+rd$symbol <- symbols
+sum(rd$symbol == "FOLH1", na.rm = TRUE)
+
+## normalization
+dds <- DESeqDataSetFromMatrix(
+  countData = assay(prad),
+  colData = colData(prad),
+  design = ~ 1
+)
+dds <- estimateSizeFactors(dds)
+vsd <- varianceStabilizingTransformation(
+  dds,
+  blind = TRUE
+)
+expr_norm <- assay(vsd)
+dim(expr_norm)
+exists("expr_norm")
+
+## primary tumours only
+print(table(cd$sample_type))
+primary_idx <- which(cd$sample_type == "Primary Tumor")
+expr_norm_tumor <- expr_norm[, primary_idx]
+cd_tumor <- cd[primary_idx, ]
+dim(expr_norm_tumor)
+
+## FOLH1 expression
+folh1_idx <- which(rd$symbol == "FOLH1")
+if(length(folh1_idx) == 0){
+  stop("FOLH1 not found.")
+}
+folh1 <- as.numeric(
+  expr_norm_tumor[folh1_idx[1], ]
+)
+
+# dataframe
+df <- data.frame(
+  sample = colnames(expr_norm_tumor),
+  FOLH1 = folh1,
+  sample_type = cd_tumor$sample_type,
+  stringsAsFactors = FALSE)
+
+## ssGSEA immune infiltration
+expr_gsva <- expr_norm_tumor
+rownames(expr_gsva) <- rd$symbol
+expr_gsva <- expr_gsva[
+  !is.na(rownames(expr_gsva)),
+]
+expr_gsva <- expr_gsva[
+  rownames(expr_gsva) != "",
+]
+expr_gsva <- expr_gsva[
+  !duplicated(rownames(expr_gsva)),
+]
+dim(expr_gsva)
+
+## immune signatures
+immune_sets <- list(
+  
+  Cytotoxic_T = c(
+    "CD8A","CD8B","GZMA","GZMB",
+    "PRF1","NKG7","IFNG"
+  ),
+  
+  Treg = c(
+    "FOXP3","IL2RA","CTLA4",
+    "TIGIT","IKZF2"
+  ),
+  
+  Exhausted_T = c(
+    "PDCD1","CTLA4","LAG3",
+    "HAVCR2","TIGIT"
+  ),
+  
+  NK = c(
+    "NCR1","NKG7","GNLY",
+    "KLRD1","PRF1"
+  ),
+  
+  Bcell = c(
+    "CD19","CD79A",
+    "CD79B","MS4A1"
+  ),
+  
+  Macrophage_M2 = c(
+    "CD68","CD163","MRC1",
+    "MSR1","CCL18"
+  ),
+  
+  Dendritic = c(
+    "ITGAX","HLA-DRA",
+    "CLEC10A","FCER1A"
+  ),
+  
+  IFNg_Response = c(
+    "IFNG","STAT1",
+    "CXCL9","CXCL10","IDO1"
+  ),
+  
+  Antigen_Presentation = c(
+    "B2M","HLA-A","HLA-B",
+    "TAP1","TAP2"
+  )
+)
+
+## keep only genes present
+immune_sets <- lapply(
+  immune_sets,
+  function(x)
+    intersect(
+      x,
+      rownames(expr_gsva)
+    )
+)
+immune_sets <- immune_sets[
+  sapply(
+    immune_sets,
+    length
+  ) >= 2
+]
+sapply(immune_sets, length)
+
+## ssGSEA
+ssgsea_par <- ssgseaParam(
+  exprData = as.matrix(expr_gsva),
+  geneSets = immune_sets
+)
+ssgsea_scores <- gsva(ssgsea_par)
+dim(ssgsea_scores)
+rownames(ssgsea_scores)
+
+## FOLH1
+folh1_idx <- which(rd$symbol == "FOLH1")
+folh1 <- as.numeric(
+  expr_norm_tumor[
+    folh1_idx,
+  ]
+)
+
+## dataframe
+df <- data.frame(
+  sample = colnames(expr_norm_tumor),
+  FOLH1 = folh1,
+  stringsAsFactors = FALSE
+)
+for(sig in rownames(ssgsea_scores)){
+  df[[sig]] <- as.numeric(
+    ssgsea_scores[sig, ]
+  )
+}
+
+## FOLH1 HIGH / LOW
+df$FOLH1_group <- ifelse(
+  df$FOLH1 >= median(df$FOLH1),
+  "High",
+  "Low"
+)
+df$FOLH1_group <- factor(
+  df$FOLH1_group,
+  levels = c("Low","High")
+)
+table(df$FOLH1_group)
+
+## Wilcoxon test
+immune_stats <- data.frame()
+for(sig in rownames(ssgsea_scores)){
+  w <- wilcox.test(
+    df[[sig]] ~ df$FOLH1_group
+  )
+  low_med <- median(
+    df[df$FOLH1_group=="Low", sig],
+    na.rm = TRUE
+  )
+  high_med <- median(
+    df[df$FOLH1_group=="High", sig],
+    na.rm = TRUE
+  )
+  immune_stats <- rbind(
+    immune_stats,
+    data.frame(
+      Signature = sig,
+      Low_Median = low_med,
+      High_Median = high_med,
+      Difference = high_med - low_med,
+      p_value = w$p.value
+    )
+  )
+}
+immune_stats$FDR <- p.adjust(
+  immune_stats$p_value,
+  method = "BH"
+)
+immune_stats <- immune_stats[
+  order(immune_stats$FDR),
+]
+immune_stats
+
+## Spearman correlations
+cor_results <- data.frame()
+for(sig in rownames(ssgsea_scores)){
+  ct <- cor.test(
+    df$FOLH1,
+    df[[sig]],
+    method = "spearman",
+    exact = FALSE
+  )
+  cor_results <- rbind(
+    cor_results,
+    data.frame(
+      Signature = sig,
+      rho = unname(ct$estimate),
+      p_value = ct$p.value
+    )
+  )
+}
+cor_results$FDR <- p.adjust(
+  cor_results$p_value,
+  method = "BH"
+)
+cor_results <- cor_results[
+  order(cor_results$FDR),
+]
+cor_results
+print(cor_results)
+
+## top association scatterplot
+top_sig <- cor_results$Signature[1]
+p_scatter <- ggplot(
+  df,
+  aes(
+    x = FOLH1,
+    y = .data[[top_sig]]
+  )
+) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(
+    method = "lm",
+    se = TRUE
+  ) +
+  theme_bw(base_size = 16) +
+  labs(
+    title = paste("FOLH1 vs", top_sig),
+    x = "FOLH1 expression (VST)",
+    y = paste(top_sig, "ssGSEA score")
+  )
+
+## heatmap
+cor_results$Significance <- ifelse(
+  cor_results$FDR < 0.0001, "****",
+  ifelse(
+    cor_results$FDR < 0.001, "***",
+    ifelse(
+      cor_results$FDR < 0.01, "**",
+      ifelse(
+        cor_results$FDR < 0.05, "*",
+        "ns"
+      )
+    )
+  )
+)
+heat <- matrix(
+  cor_results$rho,
+  nrow = 1
+)
+rownames(heat) <- "FOLH1"
+colnames(heat) <- cor_results$Signature
+display_mat <- matrix(
+  paste0(
+    sprintf("%.2f", cor_results$rho),
+    "\n",
+    cor_results$Significance
+  ),
+  nrow = 1
+)
+rownames(display_mat) <- "FOLH1"
+colnames(display_mat) <- cor_results$Signature
+pdf(
+  file.path(
+    out_dir,
+    "FOLH1_GSVA_Immune_Heatmap.pdf"
+  ),
+  width = 10,
+  height = 3
+)
+pheatmap(
+  heat,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  display_numbers = display_mat,
+  fontsize_number = 12,
+  number_color = "black",
+  color = colorRampPalette(
+    c("navy","white","firebrick3")
+  )(100),
+  breaks = seq(-1,1,length.out = 101),
+  main = "FOLH1 correlations with immune programs"
+)
+dev.off()
+
+# boxplots
+plot_df <- df %>%
+  select(
+    FOLH1_group,
+    all_of(rownames(ssgsea_scores))
+  ) %>%
+  pivot_longer(
+    cols = -FOLH1_group,
+    names_to = "Signature",
+    values_to = "Score"
+  )
+sig_labels <- immune_stats %>%
+  select(
+    Signature,
+    FDR
+  )
+
+sig_labels$Significance <- ifelse(
+  sig_labels$FDR < 0.0001, "****",
+  ifelse(
+    sig_labels$FDR < 0.001, "***",
+    ifelse(
+      sig_labels$FDR < 0.01, "**",
+      ifelse(
+        sig_labels$FDR < 0.05, "*",
+        "ns"
+      )
+    )
+  )
+)
+
+sig_labels$label <- paste0(
+  sig_labels$Significance,
+  "\nFDR=",
+  formatC(
+    sig_labels$FDR,
+    format = "e",
+    digits = 2
+  )
+)
+
+ypos <- plot_df %>%
+  group_by(Signature) %>%
+  summarise(
+    y = max(Score, na.rm = TRUE) * 1.15,
+    .groups = "drop"
+  )
+
+sig_labels <- left_join(
+  sig_labels,
+  ypos,
+  by = "Signature"
+)
+
+sig_labels$x <- 1.5
+p <- ggplot(
+  plot_df,
+  aes(
+    FOLH1_group,
+    Score,
+    fill = FOLH1_group
+  )
+) +
+  geom_boxplot(
+    outlier.shape = NA,
+    width = 0.6
+  ) +
+  geom_jitter(
+    width = 0.15,
+    alpha = 0.35,
+    size = 0.7
+  ) +
+  geom_text(
+    data = sig_labels,
+    aes(
+      x = x,
+      y = y,
+      label = label
+    ),
+    inherit.aes = FALSE,
+    size = 5
+  ) +
+  facet_wrap(
+    ~ Signature,
+    scales = "free_y"
+  ) +
+  scale_fill_manual(
+    values = c(
+      Low = "grey70",
+      High = "red3"
+    )
+  ) +
+  theme_bw(base_size = 15) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(face = "bold")
+  ) +
+  labs(
+    title = "Immune programs in FOLH1-high prostate tumors",
+    x = "",
+    y = "ssGSEA score"
+  )
+
+ggsave(
+  file.path(
+    out_dir,
+    "FOLH1_GSVA_ImmunePrograms.pdf"
+  ),
+  p,
+  width = 13,
+  height = 8
+)
+
+## excel output
+wb <- createWorkbook()
+addWorksheet(
+  wb,
+  "Wilcoxon"
+)
+writeData(
+  wb,
+  "Wilcoxon",
+  immune_stats
+)
+addWorksheet(
+  wb,
+  "Correlations"
+)
+writeData(
+  wb,
+  "Correlations",
+  cor_results
+)
+addWorksheet(
+  wb,
+  "Group_Counts"
+)
+writeData(
+  wb,
+  "Group_Counts",
+  data.frame(
+    Group = names(
+      table(df$FOLH1_group)
+    ),
+    Count = as.numeric(
+      table(df$FOLH1_group)
+    )
+  )
+)
+saveWorkbook(
+  wb,
+  file.path(
+    out_dir,
+    "FOLH1_GSVA_ImmunePhenotype.xlsx"
+  ),
+  overwrite = TRUE
+)
