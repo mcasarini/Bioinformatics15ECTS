@@ -1,0 +1,161 @@
+# Difference in immune gene programs activity in relation to FOLH1 expression in TCGA-PRAD 
+Which immune programs are different between FOLH1-high and FOLH1-low prostate tumors?
+
+## setup
+base_dir <- "C:/Users/Martina/Desktop/TCGA"
+setwd(base_dir)
+out_dir <- file.path(base_dir, "results")
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+
+## packages
+library(SummarizedExperiment)
+library(dplyr)
+library(ggplot2)
+library(openxlsx)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(pheatmap)
+library(sysfonts)
+
+## load TCGA-PRAD 
+prad <- readRDS("TCGA_PRAD_clinical.rds")
+expr <- assay(prad)
+cd <- as.data.frame(colData(prad))
+rd <- as.data.frame(rowData(prad))
+
+## gene annotation
+ens <- gsub("\\..*", "", rd$gene_id)
+rd$symbol <- mapIds(
+  org.Hs.eg.db,
+  keys = ens,
+  column = "SYMBOL",
+  keytype = "ENSEMBL",
+  multiVals = "first")
+rowData(prad)$symbol <- rd$symbol
+
+## extract FOLH1 expression 
+folh1_idx <- which(rd$symbol == "FOLH1")
+stopifnot(length(folh1_idx) > 0)
+folh1 <- as.numeric(expr[folh1_idx[1], ])
+
+## immune programs
+immune_programs <- list(
+  CD8_T = c("CD8A","CD8B","CD3D","CD3E"),
+  Cytotoxic = c("GZMB","PRF1","NKG7"),
+  Treg = c("FOXP3","IL2RA"),
+  Exhaustion = c("PDCD1","CTLA4","LAG3","TIGIT"),
+  NK = c("NCR1","KLRD1"),
+  Bcell = c("MS4A1","CD19"),
+  Myeloid = c("CD68","CD163","MRC1"),
+  DC = c("ITGAX","HLA-DRA"))
+
+## gene extraction
+get_program_score <- function(genes) {
+  vals <- sapply(genes, function(g) {
+    idx <- which(rd$symbol == g)
+    if (length(idx) == 0) return(rep(NA_real_, ncol(expr)))
+    as.numeric(expr[idx[1], ])})
+  vals <- as.matrix(vals)
+  if (ncol(vals) == 1) {
+    return(vals[,1])} else {
+    return(rowMeans(vals, na.rm = TRUE))}}
+program_mat <- as.data.frame(sapply(immune_programs, get_program_score))
+
+## build dataframe
+df <- data.frame(
+  sample = colnames(expr),
+  FOLH1 = as.numeric(folh1),
+  program_mat,
+  sample_type = cd$sample_type)
+df <- df %>%
+  filter(sample_type == "Primary Tumor") %>%
+  na.omit()
+df$logFOLH1 <- log2(df$FOLH1 + 1)
+
+## FOLH1 groups
+df$FOLH1_group <- ifelse(
+  df$logFOLH1 >= median(df$logFOLH1, na.rm = TRUE),"High","Low")
+df$FOLH1_group <- factor(df$FOLH1_group,levels = c("Low", "High"))
+
+## statistics
+group_results <- lapply(names(immune_programs), function(p) {
+  low_vals  <- df[df$FOLH1_group == "Low", p]
+  high_vals <- df[df$FOLH1_group == "High", p]
+  test <- wilcox.test(low_vals, high_vals, exact = FALSE)
+  data.frame(
+    Program = p,
+    median_low = median(low_vals, na.rm = TRUE),
+    median_high = median(high_vals, na.rm = TRUE),
+    delta = median(high_vals, na.rm = TRUE) - median(low_vals, na.rm = TRUE),
+    p_value = test$p.value)}) %>% bind_rows()
+group_results$FDR <- p.adjust(group_results$p_value, "BH")
+group_results$significance <- case_when(
+  group_results$FDR < 0.001 ~ "***",
+  group_results$FDR < 0.01 ~ "**",
+  group_results$FDR < 0.05 ~ "*",
+  TRUE ~ "ns")
+group_results$direction <- ifelse(
+  group_results$delta > 0,
+  "Higher in FOLH1-high",
+  "Higher in FOLH1-low")
+pad <- max(abs(group_results$delta), na.rm = TRUE) * 0.08
+group_results$label <- ifelse(
+  group_results$FDR < 0.05,
+  group_results$significance,"")
+
+## plot
+group_results <- group_results %>%
+  arrange(FDR, desc(abs(delta)))
+group_results$Program <- factor(group_results$Program, levels = group_results$Program)
+p <- ggplot(group_results, aes(x = Program, y = delta, fill = delta)) +
+  geom_col(width = 0.7, color = "black", linewidth = 0.25) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.5) +
+  geom_text(
+    aes(
+      label = label,
+      y = delta + ifelse(delta >= 0, pad, -pad)),
+    family = "Arial",
+    fontface = "bold",
+    size = 4) +
+  scale_fill_gradient2(
+    low = "#2166AC",
+    mid = "white",
+    high = "#B2182B",
+    midpoint = 0,
+    name = "Δ median\n(High - Low)") +
+  theme_classic(base_size = 14) +
+  theme(
+    text = element_text(family="Arial"),
+    axis.text.y = element_text(size=12),
+    axis.text.x = element_text(size=11),
+    axis.title = element_text(face="bold", size=13),
+    plot.title = element_text(face="bold", size=15),
+    plot.subtitle = element_text(size=12),
+    legend.title = element_text(face="bold"),
+    legend.position="right",
+    plot.margin = margin(10, 25, 10, 10)) +
+  coord_flip(
+    clip = "off") +
+  scale_y_continuous(
+    expand = expansion(mult = c(0.05,0.15))) +
+  labs(
+    title = "Tumor-intrinsic immune programs differ by FOLH1 expression",
+    subtitle = "TCGA-PRAD primary tumors",
+    x = NULL,
+    y = "Δ median program score")
+print(p)
+ggsave(file.path(out_dir, "9_TCGA-PRAD_ImmunePrograms.pdf"), p, width = 7, height = 5, dpi = 600)
+
+## summary
+wb <- createWorkbook()
+addWorksheet(wb, "Group_Comparison")
+writeData(wb, "Group_Comparison", group_results)
+addWorksheet(wb, "Summary")
+writeData(wb, "Summary", data.frame(
+  n_samples = nrow(df),
+  n_programs = length(immune_programs),
+  median_FOLH1 = median(df$FOLH1)))
+saveWorkbook(
+  wb,
+  file.path(out_dir, "9_TCGA-PRAD_ImmunePrograms.xlsx"),
+  overwrite = TRUE)
