@@ -1,0 +1,268 @@
+# ================================================================
+# MTK26: HALLMARK GSEA 
+# ================================================================
+
+df <- as.data.frame(
+  gsea_hallmark
+)
+
+df <- df %>%
+  arrange(p.adjust) %>%
+  slice_head(n = 20)
+
+# ------------------------------------------------
+# FORCE EVERY DESCRIPTION TO EXACTLY TWO LINES
+# ------------------------------------------------
+
+df$Description_2line <- sapply(
+  df$Description,
+  function(x) {
+    
+    words <- strsplit(
+      trimws(x),
+      "\\s+"
+    )[[1]]
+    
+    # Single word
+    if (length(words) == 1) {
+      
+      n <- nchar(x)
+      mid <- ceiling(n / 2)
+      
+      return(
+        paste0(
+          substr(x, 1, mid),
+          "\n",
+          substr(x, mid + 1, n)
+        )
+      )
+    }
+    
+    txt <- paste(
+      words,
+      collapse = " "
+    )
+    
+    total <- nchar(txt)
+    
+    cumulative <- cumsum(
+      nchar(words)
+    ) +
+      seq_along(words) - 1
+    
+    possible <- seq_len(
+      length(words) - 1
+    )
+    
+    split_at <- possible[
+      which.min(
+        abs(
+          cumulative[possible] -
+            total / 2
+        )
+      )
+    ]
+    
+    paste(
+      paste(
+        words[1:split_at],
+        collapse = " "
+      ),
+      paste(
+        words[(split_at + 1):length(words)],
+        collapse = " "
+      ),
+      sep = "\n"
+    )
+  }
+)
+
+# ------------------------------------------------
+# NES
+# ------------------------------------------------
+
+df$X_value <- df$NES
+
+# ------------------------------------------------
+# SIGNIFICANCE
+# ------------------------------------------------
+
+df$minus_log10_padj <- -log10(
+  pmax(
+    df$p.adjust,
+    .Machine$double.xmin
+  )
+)
+
+# ------------------------------------------------
+# DOT SIZE
+# ------------------------------------------------
+
+if ("setSize" %in% colnames(df)) {
+  
+  df$DotSize <- df$setSize
+  
+} else if ("Count" %in% colnames(df)) {
+  
+  df$DotSize <- df$Count
+  
+} else {
+  
+  df$DotSize <- 1
+  
+}
+
+# ------------------------------------------------
+# ORDER Y AXIS
+# ------------------------------------------------
+
+df$Description_2line <- factor(
+  df$Description_2line,
+  levels = rev(
+    df$Description_2line
+  )
+)
+
+# ------------------------------------------------
+# MAKE PLOT
+# ------------------------------------------------
+
+p_hallmark <- ggplot(
+  df,
+  aes(
+    x = X_value,
+    y = Description_2line,
+    size = DotSize,
+    colour = minus_log10_padj
+  )
+) +
+  
+  geom_point(
+    alpha = 0.9
+  ) +
+  
+  scale_colour_gradient(
+    name = expression(
+      -log[10]("adjusted P")
+    )
+  ) +
+  
+  scale_size_continuous(
+    range = c(5, 13),
+    name = "Gene count"
+  ) +
+  
+  labs(
+    title = paste0(
+      "Hallmark GSEA — treated vs control (",
+      plot_label,
+      ")"
+    ),
+    x = "Normalized enrichment score (NES)",
+    y = NULL
+  ) +
+  
+  theme_nature(
+    base_size = 18
+  ) +
+  
+  theme(
+    
+    plot.title = element_text(
+      face = "bold",
+      hjust = 0.5,
+      size = 24,
+      margin = margin(
+        b = 22
+      )
+    ),
+    
+    axis.title.x = element_text(
+      face = "bold",
+      size = 20,
+      margin = margin(
+        t = 15
+      )
+    ),
+    
+    axis.text.x = element_text(
+      size = 17
+    ),
+    
+    # EXACTLY TWO-LINE LABELS
+    axis.text.y = element_text(
+      size = 20,
+      colour = "black",
+      lineheight = 0.85
+    ),
+    
+    legend.text = element_text(
+      size = 15
+    ),
+    
+    legend.title = element_text(
+      face = "bold",
+      size = 16
+    ),
+    
+    plot.margin = margin(
+      t = 20,
+      r = 45,
+      b = 25,
+      l = 100
+    )
+  )
+
+# ------------------------------------------------
+# OUTPUT FILE
+# ------------------------------------------------
+
+plot_file <- file.path(
+  gsea_dir,
+  "GSEA_Hallmark_professional_MTK26.png"
+)
+
+# Make sure directory exists
+dir.create(
+  gsea_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+# ------------------------------------------------
+# SAVE
+# ------------------------------------------------
+
+ggsave(
+  filename = plot_file,
+  plot = p_hallmark,
+  width = 20,
+  height = 18,
+  dpi = 400,
+  limitsize = FALSE
+)
+
+# ------------------------------------------------
+# DISPLAY
+# ------------------------------------------------
+
+print(
+  p_hallmark
+)
+
+# ------------------------------------------------
+# CONFIRM
+# ------------------------------------------------
+
+cat(
+  "\n\nFILE SAVED:\n",
+  normalizePath(
+    plot_file,
+    mustWork = FALSE
+  ),
+  "\n\nEXISTS:",
+  file.exists(
+    plot_file
+  ),
+  "\n"
+)
