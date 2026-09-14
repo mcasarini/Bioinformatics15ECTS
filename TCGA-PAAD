@@ -1,0 +1,5205 @@
+# 00_TCGA-PAAD download & DESeq2
+
+# Create output directory if it doesn't exist
+dir.create(
+  "C:/Users/Martina/Desktop/New folder/results/TCGA-PAAD_analysis/rawdata",
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+# Set it as working directory
+setwd("C:/Users/Martina/Desktop/New folder/results/TCGA-PAAD_analysis/rawdata")
+getwd()
+
+# Install BiocManager if needed
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+# Install required CRAN packages
+install.packages(c(
+  "dplyr",
+  "dbplyr",
+  "rvest",
+  "xml2",
+  "httr",
+  "readr",
+  "tidyr",
+  "purrr",
+  "stringr"
+))
+
+# Install TCGAbiolinks and dependencies
+BiocManager::install(
+  "TCGAbiolinks",
+  dependencies = TRUE,
+  force = TRUE
+)
+
+# Load package
+library(TCGAbiolinks)
+library(SummarizedExperiment)
+
+# Query TCGA Pancreatic Adenocarcinoma RNA-seq data
+query <- GDCquery(
+  project = "TCGA-PAAD",
+  data.category = "Transcriptome Profiling",
+  data.type = "Gene Expression Quantification",
+  workflow.type = "STAR - Counts"
+)
+
+# Download data
+GDCdownload(query)
+
+# Prepare data into a SummarizedExperiment object
+data <- GDCprepare(query)
+
+# Inspect data
+data
+
+# Expression matrix dimensions
+dim(assay(data))
+
+# Sample metadata
+colData(data)
+
+# Gene annotations
+rowData(data)
+
+# Save for later use
+saveRDS(data, file = "TCGA_PAAD_STAR_Counts.rds")
+write.csv(
+  as.data.frame(assay(data)),
+  "TCGA_PAAD_counts.csv")
+
+# check
+table(colData(data)$sample_type)
+
+# DESeq2
+sample_info <- as.data.frame(colData(data))
+sample_info$group <- ifelse(
+  sample_info$sample_type == "Primary Tumor",
+  "Tumor",
+  ifelse(
+    sample_info$sample_type == "Solid Tissue Normal",
+    "Normal",
+    NA
+  )
+)
+
+# significant genes
+keep <- !is.na(sample_info$group)
+counts <- assay(data)[, keep]
+sample_info <- sample_info[keep, ]
+table(sample_info$group)
+library(DESeq2)
+dds <- DESeqDataSetFromMatrix(
+  countData = counts,
+  colData = sample_info,
+  design = ~ group
+)
+dds <- dds[rowSums(counts(dds)) > 10, ]
+dds$group <- factor(dds$group)
+dds$group <- relevel(dds$group, ref = "Normal")
+dds <- DESeq(dds)
+res <- results(dds)
+
+# create results table
+res_df <- as.data.frame(res)
+res_df$gene_name <- rowData(data)$gene_name[
+  match(rownames(res_df), rownames(data))
+]
+res_df <- res_df[order(res_df$padj), ]
+head(res_df[, c("gene_name", "log2FoldChange", "padj")], 20)
+
+# convert list columns to text
+clinical <- as.data.frame(colData(data))
+
+clinical[] <- lapply(clinical, function(x) {
+  if (is.list(x)) {
+    sapply(x, function(y) paste(y, collapse = "; "))
+  } else {
+    x
+  }
+})
+
+# Save DESeq2 results
+write.csv(
+  res_df,
+  "TCGA_PAAD_DESeq2_results.csv",
+  row.names = TRUE)
+
+# Save significant genes only
+sig_genes <- subset(
+  res_df,
+  padj < 0.05 & abs(log2FoldChange) > 1)
+write.csv(
+  sig_genes,
+  "TCGA_PAAD_significant_genes.csv",
+  row.names = TRUE)
+
+# Save clinical metadata
+write.csv(
+  as.data.frame(colData(data)),
+  "TCGA_PAAD_clinical_metadata.csv",
+  row.names = TRUE,)
+
+# Save gene annotations
+write.csv(
+  as.data.frame(rowData(data)),
+  "TCGA_PAAD_gene_annotations.csv",
+  row.names = TRUE,)
+
+saveRDS(dds, "dds.rds")
+saveRDS(res_df, "res_df.rds")
+saveRDS(sig_genes, "sig_genes.rds")
+saveRDS(sample_info, "sample_info.rds")
+getwd()
+
+# check
+nrow(sig_genes)
+head(
+  res_df[, c("gene_name", "log2FoldChange", "padj")],
+  20
+)
+head(
+  sig_genes[, c("gene_name", "log2FoldChange", "padj")],
+  20
+)
+
+# ============================================================
+# 01_TCGA-PAAD: DATA PROCESSING
+# ============================================================
+
+suppressPackageStartupMessages({
+  
+  library(data.table)
+  
+  library(dplyr)
+  
+  library(stringr)
+  
+  library(openxlsx)
+  
+})
+
+# ============================================================
+# DIRECTORIES
+# ============================================================
+
+tcga_dir <-
+  
+  "C:/Users/Martina/Desktop/TCGA/rawdata/0_TCGA-panCancer/GDCdata/TCGA-PAAD/Transcriptome_Profiling/Gene_Expression_Quantification"
+
+outdir <-
+  
+  "C:/Users/Martina/Desktop/New folder/results/TCGA-PAAD_analysis"
+
+processing_dir <- file.path(
+  
+  outdir,
+  
+  "01_Data_Processing"
+  
+)
+
+dir.create(
+  
+  processing_dir,
+  
+  recursive = TRUE,
+  
+  showWarnings = FALSE
+  
+)
+
+
+# ============================================================
+# STAR FILES
+# ============================================================
+
+expr_files <- list.files(
+  
+  tcga_dir,
+  
+  pattern =
+    "augmented_star_gene_counts.tsv$",
+  
+  recursive = TRUE,
+  
+  full.names = TRUE
+  
+)
+
+length(expr_files)
+
+writeLines(
+  
+  expr_files,
+  
+  file.path(
+    
+    processing_dir,
+    
+    "PAAD_File_List.txt"
+    
+  )
+  
+)
+# ============================================================
+# INSPECT FIRST FILE
+# ============================================================
+
+tmp <- fread(
+  
+  expr_files[1],
+  
+  skip = 1
+  
+)
+
+colnames(tmp)
+
+head(tmp)
+# ============================================================
+# GENE ANNOTATION
+# ============================================================
+
+gene_annotation <- tmp %>%
+  
+  select(
+    
+    gene_id,
+    
+    gene_name,
+    
+    gene_type
+    
+  )
+
+gene_annotation <- gene_annotation %>%
+  
+  filter(
+    
+    !startsWith(
+      gene_id,
+      "N_"
+    )
+    
+  )
+
+write.csv(
+  
+  gene_annotation,
+  
+  file.path(
+    
+    processing_dir,
+    
+    "PAAD_Gene_Annotation.csv"
+    
+  ),
+  
+  row.names = FALSE
+  
+)
+# ============================================================
+# BUILD FPKM-UQ MATRIX
+# ============================================================
+
+expr_list <- vector(
+  
+  "list",
+  
+  length(expr_files)
+  
+)
+
+sample_names <- basename(
+  
+  dirname(
+    expr_files
+  )
+  
+)
+
+for(i in seq_along(expr_files)){
+  
+  cat(
+    
+    i,
+    
+    "/",
+    
+    length(expr_files),
+    
+    "\n"
+    
+  )
+  
+  df <- fread(
+    
+    expr_files[i],
+    
+    skip = 1
+    
+  )
+  
+  df <- df %>%
+    
+    filter(
+      
+      !startsWith(
+        gene_id,
+        "N_"
+      )
+      
+    )
+  
+  expr_list[[i]] <-
+    
+    df$fpkm_uq_unstranded
+  
+}
+# ============================================================
+# COMBINE SAMPLES
+# ============================================================
+
+expr_mat <- do.call(
+  
+  cbind,
+  
+  expr_list
+  
+)
+
+colnames(expr_mat) <-
+  
+  sample_names
+
+rownames(expr_mat) <-
+  
+  gene_annotation$gene_name
+
+dim(expr_mat)
+# ============================================================
+# CLEAN GENE NAMES
+# ============================================================
+
+keep <-
+  
+  !is.na(rownames(expr_mat)) &
+  
+  rownames(expr_mat) != ""
+
+expr_mat <- expr_mat[
+  
+  keep,
+  
+  ,
+  
+  drop = FALSE
+  
+]
+
+cat(
+  
+  "Genes after cleanup:",
+  
+  nrow(expr_mat),
+  
+  "\n"
+  
+)
+# ============================================================
+# REMOVE DUPLICATES
+# ============================================================
+
+gene_means <- rowMeans(
+  
+  expr_mat,
+  
+  na.rm = TRUE
+  
+)
+
+tmp_df <- data.frame(
+  
+  Gene = rownames(expr_mat),
+  
+  MeanExpr = gene_means,
+  
+  RowID = seq_len(
+    
+    nrow(expr_mat)
+    
+  ),
+  
+  stringsAsFactors = FALSE
+  
+)
+
+tmp_unique <- tmp_df %>%
+  
+  group_by(Gene) %>%
+  
+  slice_max(
+    
+    MeanExpr,
+    
+    n = 1,
+    
+    with_ties = FALSE
+    
+  ) %>%
+  
+  ungroup()
+
+expr_mat <- expr_mat[
+  
+  tmp_unique$RowID,
+  
+  ,
+  
+  drop = FALSE
+  
+]
+
+rownames(expr_mat) <-
+  
+  tmp_unique$Gene
+
+cat(
+  
+  "Remaining duplicates:",
+  
+  sum(
+    
+    duplicated(
+      
+      rownames(expr_mat)
+      
+    )
+    
+  ),
+  
+  "\n"
+  
+)
+# ============================================================
+# LOG2 MATRIX
+# ============================================================
+
+expr_log2 <- log2(
+  
+  expr_mat + 1
+  
+)
+
+summary(
+  
+  as.vector(
+    
+    expr_log2[1:1000,1:10]
+    
+  )
+  
+)
+# ============================================================
+# SAMPLE METADATA
+# ============================================================
+
+sample_metadata <- data.frame(
+  
+  SampleID =
+    
+    colnames(
+      
+      expr_log2
+      
+    ),
+  
+  stringsAsFactors = FALSE
+  
+)
+
+write.csv(
+  
+  sample_metadata,
+  
+  file.path(
+    
+    processing_dir,
+    
+    "PAAD_Sample_Metadata.csv"
+    
+  ),
+  
+  row.names = FALSE
+  
+)
+# ============================================================
+# SAVE OBJECTS
+# ============================================================
+
+save(
+  
+  expr_mat,
+  
+  expr_log2,
+  
+  gene_annotation,
+  
+  sample_metadata,
+  
+  file = file.path(
+    
+    processing_dir,
+    
+    "PAAD_Expression_Objects.RData"
+    
+  )
+  
+)
+
+saveRDS(
+  
+  expr_log2,
+  
+  file.path(
+    
+    processing_dir,
+    
+    "PAAD_FPKM_UQ_Matrix.rds"
+    
+  )
+  
+)
+
+write.csv(
+  
+  expr_log2,
+  
+  file.path(
+    
+    processing_dir,
+    
+    "PAAD_FPKM_UQ_Matrix.csv"
+    
+  )
+  
+)
+# ============================================================
+# SUMMARY REPORT
+# ============================================================
+
+processing_summary <- data.frame(
+  
+  Metric = c(
+    
+    "Samples",
+    
+    "Genes",
+    
+    "Duplicate_Genes_Removed"
+    
+  ),
+  
+  Value = c(
+    
+    ncol(expr_log2),
+    
+    nrow(expr_log2),
+    
+    sum(
+      
+      duplicated(
+        
+        gene_annotation$gene_name
+        
+      )
+      
+    )
+    
+  )
+  
+)
+
+wb <- createWorkbook()
+
+addWorksheet(
+  wb,
+  "Summary"
+)
+
+writeData(
+  
+  wb,
+  
+  "Summary",
+  
+  processing_summary
+  
+)
+
+saveWorkbook(
+  
+  wb,
+  
+  file.path(
+    
+    processing_dir,
+    
+    "Processing_Report.xlsx"
+    
+  ),
+  
+  overwrite = TRUE
+  
+)
+
+print(processing_summary)
+
+cat(
+  "\n====================================\n"
+)
+
+cat(
+  "TCGA-PAAD PROCESSING COMPLETE\n"
+)
+
+cat(
+  "====================================\n"
+)
+
+cat(
+  processing_dir,
+  "\n"
+)
+
+cat(
+  "====================================\n"
+)
+# ============================================================
+# 02_TCGA-PAAD: NEUROENDOCRINE VALIDATION
+#
+# Objective:
+# Determine whether PINK1 is associated with
+# a neuroendocrine transcriptional program
+# in human pancreatic adenocarcinoma.
+#
+# Visualization:
+#   • Heatmaps
+#   • Boxplots
+#   • Scatterplots
+# ============================================================
+
+# ============================================================
+# LIBRARIES
+# ============================================================
+
+suppressPackageStartupMessages({
+  
+  library(dplyr)
+  
+  library(tidyr)
+  
+  library(ggplot2)
+  
+  library(pheatmap)
+  
+  library(openxlsx)
+  
+})
+
+# ============================================================
+# INPUT CHECK
+# ============================================================
+
+if(!exists("expr_log2")){
+  
+  stop("expr_log2 not found")
+  
+}
+
+# ============================================================
+# OUTPUT DIRECTORY
+# ============================================================
+
+ne_dir <- file.path(
+  
+  outdir,
+  
+  "02_Neuroendocrine_Validation"
+  
+)
+
+dir.create(
+  
+  ne_dir,
+  
+  recursive = TRUE,
+  
+  showWarnings = FALSE
+  
+)
+
+# ============================================================
+# PUBLICATION THEME
+# ============================================================
+
+theme_pub <- theme_classic(
+  
+  base_size = 14
+  
+) +
+  
+  theme(
+    
+    plot.title = element_text(
+      
+      face = "bold"
+      
+    ),
+    
+    axis.title = element_text(
+      
+      face = "bold"
+      
+    )
+    
+  )
+
+# ============================================================
+# COLORS
+# ============================================================
+
+col_low <- "#4E79A7"
+
+col_high <- "#E15759"
+
+# ============================================================
+# NEUROENDOCRINE SIGNATURE
+# ============================================================
+
+ne_genes <- c(
+  
+  "SCG2",
+  
+  "SCG3",
+  
+  "CHGB",
+  
+  "NCAM1",
+  
+  "SYP",
+  
+  "ENO2",
+  
+  "INSM1",
+  
+  "DLL3",
+  
+  "ASCL1"
+  
+)
+
+ne_present <- ne_genes[
+  
+  ne_genes %in%
+    
+    rownames(expr_log2)
+  
+]
+
+cat(
+  
+  "Detected NE genes:",
+  
+  length(ne_present),
+  
+  "\n"
+  
+)
+
+print(ne_present)
+
+if(length(ne_present) < 5){
+  
+  stop(
+    
+    paste0(
+      
+      "Only ",
+      
+      length(ne_present),
+      
+      " neuroendocrine genes detected."
+      
+    )
+    
+  )
+  
+}
+
+# ============================================================
+# GENE COVERAGE
+# ============================================================
+
+gene_coverage <- data.frame(
+  
+  Gene = ne_genes,
+  
+  Present = ne_genes %in%
+    
+    rownames(expr_log2)
+  
+)
+
+write.csv(
+  
+  gene_coverage,
+  
+  file.path(
+    
+    ne_dir,
+    
+    "NE_Gene_Coverage.csv"
+    
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# NE SCORE
+# ============================================================
+
+ne_mat <- expr_log2[
+  
+  ne_present,
+  
+  ,
+  
+  drop = FALSE
+  
+]
+
+ne_scaled <- t(
+  
+  scale(
+    
+    t(ne_mat)
+    
+  )
+  
+)
+
+NE_Score <- colMeans(
+  
+  ne_scaled,
+  
+  na.rm = TRUE
+  
+)
+
+ne_df <- data.frame(
+  
+  SampleID = colnames(expr_log2),
+  
+  NE_Score = NE_Score,
+  
+  stringsAsFactors = FALSE
+  
+)
+
+write.csv(
+  
+  ne_df,
+  
+  file.path(
+    
+    ne_dir,
+    
+    "Neuroendocrine_Score.csv"
+    
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# TERTILE STRATIFICATION
+# ============================================================
+
+q <- quantile(
+  
+  ne_df$NE_Score,
+  
+  probs = c(
+    
+    0.33,
+    
+    0.67
+    
+  ),
+  
+  na.rm = TRUE
+  
+)
+
+ne_df$NE_Group <- case_when(
+  
+  ne_df$NE_Score <= q[1] ~
+    
+    "Low_NE",
+  
+  ne_df$NE_Score >= q[2] ~
+    
+    "High_NE",
+  
+  TRUE ~
+    
+    "Intermediate_NE"
+  
+)
+
+write.csv(
+  
+  ne_df,
+  
+  file.path(
+    
+    ne_dir,
+    
+    "Neuroendocrine_Score_Classification.csv"
+    
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# NE SCORE DISTRIBUTION
+# ============================================================
+
+p_dist <- ggplot(
+  
+  ne_df,
+  
+  aes(
+    
+    x = NE_Score
+    
+  )
+  
+) +
+  
+  geom_histogram(
+    
+    bins = 30,
+    
+    fill = col_low,
+    
+    colour = "white"
+    
+  ) +
+  
+  theme_pub +
+  
+  labs(
+    
+    title =
+      
+      "Distribution of Neuroendocrine Scores",
+    
+    x =
+      
+      "Neuroendocrine Score",
+    
+    y =
+      
+      "Tumor Count"
+    
+  )
+
+ggsave(
+  
+  file.path(
+    
+    ne_dir,
+    
+    "NE_Score_Distribution.png"
+    
+  ),
+  
+  p_dist,
+  
+  width = 7,
+  
+  height = 5,
+  
+  dpi = 600
+  
+)
+
+# ============================================================
+# ORDERED HEATMAP
+# ============================================================
+
+ordered_samples <- ne_df %>%
+  
+  arrange(
+    
+    desc(
+      
+      NE_Score
+      
+    )
+    
+  ) %>%
+  
+  pull(
+    
+    SampleID
+    
+  )
+
+heat_mat <- expr_log2[
+  
+  ne_present,
+  
+  ordered_samples,
+  
+  drop = FALSE
+  
+]
+
+heat_mat <- t(
+  
+  scale(
+    
+    t(heat_mat)
+    
+  )
+  
+)
+
+pheatmap(
+  
+  heat_mat,
+  
+  cluster_rows = TRUE,
+  
+  cluster_cols = FALSE,
+  
+  show_colnames = FALSE,
+  
+  border_color = NA,
+  
+  color = colorRampPalette(
+    
+    c(
+      
+      "#2166AC",
+      
+      "white",
+      
+      "#B2182B"
+      
+    )
+    
+  )(100),
+  
+  filename = file.path(
+    
+    ne_dir,
+    
+    "NE_Signature_Heatmap_Ordered.png"
+    
+  ),
+  
+  width = 12,
+  
+  height = 5
+  
+)
+
+# ============================================================
+# PINK1 EXPRESSION
+# ============================================================
+
+if(!"PINK1" %in% rownames(expr_log2)){
+  
+  stop("PINK1 not found")
+  
+}
+
+pink1_expr <- as.numeric(
+  
+  expr_log2["PINK1", ]
+  
+)
+
+pink1_df <- data.frame(
+  
+  SampleID = colnames(expr_log2),
+  
+  PINK1 = pink1_expr,
+  
+  stringsAsFactors = FALSE
+  
+)
+
+write.csv(
+  
+  pink1_df,
+  
+  file.path(
+    
+    ne_dir,
+    
+    "PINK1_Expression.csv"
+    
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# PINK1 EXPRESSION SUMMARY
+# ============================================================
+
+pink1_summary <- data.frame(
+  
+  Metric = c(
+    
+    "Samples",
+    
+    "Mean",
+    
+    "Median",
+    
+    "Minimum",
+    
+    "Maximum",
+    
+    "SD"
+    
+  ),
+  
+  Value = c(
+    
+    nrow(pink1_df),
+    
+    mean(pink1_df$PINK1),
+    
+    median(pink1_df$PINK1),
+    
+    min(pink1_df$PINK1),
+    
+    max(pink1_df$PINK1),
+    
+    sd(pink1_df$PINK1)
+    
+  )
+  
+)
+
+write.csv(
+  
+  pink1_summary,
+  
+  file.path(
+    
+    ne_dir,
+    
+    "PINK1_Expression_Summary.csv"
+    
+  ),
+  
+  row.names = FALSE
+  
+)
+# ============================================================
+# 03_TCGA-PAAD: PINK1 CORRELATION NETWORK
+# ============================================================
+
+suppressPackageStartupMessages({
+  
+  library(dplyr)
+  
+  library(ggplot2)
+  
+  library(ggrepel)
+  
+  library(pheatmap)
+  
+  library(openxlsx)
+  
+})
+
+network_dir <- file.path(
+  
+  outdir,
+  
+  "03_PINK1_Correlation_Network"
+  
+)
+
+dir.create(
+  
+  network_dir,
+  
+  recursive = TRUE,
+  
+  showWarnings = FALSE
+  
+)
+
+if(!exists("expr_log2")){
+  
+  stop("expr_log2 not found")
+  
+}
+
+if(!"PINK1" %in% rownames(expr_log2)){
+  
+  stop("PINK1 not found")
+  
+}
+
+# ============================================================
+# PINK1 EXPRESSION
+# ============================================================
+
+pink1_expr <- as.numeric(
+  
+  expr_log2["PINK1", ]
+  
+)
+# ============================================================
+# GENOME-WIDE CORRELATIONS
+# ============================================================
+
+all_genes <- rownames(expr_log2)
+
+cor_results <- vector(
+  
+  "list",
+  
+  length(all_genes)
+  
+)
+
+for(i in seq_along(all_genes)){
+  
+  gene <- all_genes[i]
+  
+  gene_expr <- as.numeric(
+    
+    expr_log2[gene, ]
+    
+  )
+  
+  ct <- suppressWarnings(
+    
+    cor.test(
+      
+      pink1_expr,
+      
+      gene_expr,
+      
+      method = "spearman"
+      
+    )
+    
+  )
+  
+  cor_results[[i]] <- data.frame(
+    
+    Gene = gene,
+    
+    Rho = unname(
+      ct$estimate
+    ),
+    
+    Pvalue = ct$p.value
+    
+  )
+  
+}
+# ============================================================
+# CORRELATION TABLE
+# ============================================================
+
+cor_table <- do.call(
+  
+  rbind,
+  
+  cor_results
+  
+)
+
+cor_table <- cor_table %>%
+  
+  mutate(
+    
+    FDR = p.adjust(
+      
+      Pvalue,
+      
+      method = "BH"
+      
+    )
+    
+  ) %>%
+  
+  arrange(
+    
+    desc(Rho)
+    
+  )
+
+write.csv(
+  
+  cor_table,
+  
+  file.path(
+    
+    network_dir,
+    
+    "PINK1_Genomewide_Correlations.csv"
+    
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# TOP CORRELATED GENES
+# ============================================================
+
+top_positive <- cor_table %>%
+  
+  arrange(
+    desc(Rho)
+  ) %>%
+  
+  filter(
+    Gene != "PINK1"
+  ) %>%
+  
+  slice_head(
+    n = 200
+  )
+
+top_negative <- cor_table %>%
+  
+  arrange(
+    Rho
+  ) %>%
+  
+  slice_head(
+    n = 200
+  )
+
+write.csv(
+  
+  top_positive,
+  
+  file.path(
+    
+    network_dir,
+    
+    "Top_200_Positive.csv"
+    
+  ),
+  
+  row.names = FALSE
+  
+)
+
+write.csv(
+  
+  top_negative,
+  
+  file.path(
+    
+    network_dir,
+    
+    "Top_200_Negative.csv"
+    
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# ENRICHMENT INPUTS
+# ============================================================
+
+write.table(
+  
+  top_positive$Gene,
+  
+  file.path(
+    
+    network_dir,
+    
+    "Top_200_Positive_Genes.txt"
+    
+  ),
+  
+  row.names = FALSE,
+  
+  col.names = FALSE,
+  
+  quote = FALSE
+  
+)
+
+write.table(
+  
+  top_negative$Gene,
+  
+  file.path(
+    
+    network_dir,
+    
+    "Top_200_Negative_Genes.txt"
+    
+  ),
+  
+  row.names = FALSE,
+  
+  col.names = FALSE,
+  
+  quote = FALSE
+  
+)
+
+# ============================================================
+# TOP 50 HEATMAP
+# ============================================================
+
+top50 <- top_positive$Gene[1:50]
+
+heat_mat <- expr_log2[
+  
+  top50,
+  
+  ,
+  
+  drop = FALSE
+  
+]
+
+heat_mat <- t(
+  
+  scale(
+    t(heat_mat)
+  )
+  
+)
+
+pheatmap(
+  
+  heat_mat,
+  
+  show_colnames = FALSE,
+  
+  border_color = NA,
+  
+  color = colorRampPalette(
+    
+    c(
+      "#2166AC",
+      "white",
+      "#B2182B"
+    )
+    
+  )(100),
+  
+  filename = file.path(
+    
+    network_dir,
+    
+    "Top50_PINK1_Correlated_Heatmap.png"
+    
+  ),
+  
+  width = 10,
+  
+  height = 12
+  
+)
+
+# ============================================================
+# CORRELATION SUMMARY
+# ============================================================
+
+plot_df <- bind_rows(
+  
+  top_positive %>%
+    
+    slice_head(n = 20),
+  
+  top_negative %>%
+    
+    slice_head(n = 20)
+  
+)
+
+p <- ggplot(
+  
+  plot_df,
+  
+  aes(
+    
+    reorder(
+      Gene,
+      Rho
+    ),
+    
+    Rho
+    
+  )
+  
+) +
+  
+  geom_col(
+    
+    fill = "#4E79A7"
+    
+  ) +
+  
+  coord_flip() +
+  
+  theme_classic(
+    base_size = 14
+  ) +
+  
+  labs(
+    
+    title =
+      "Genes Most Associated with PINK1",
+    
+    x = NULL,
+    
+    y = "Spearman Correlation"
+    
+  )
+
+ggsave(
+  
+  file.path(
+    
+    network_dir,
+    
+    "PINK1_Top_Correlations.png"
+    
+  ),
+  
+  p,
+  
+  width = 9,
+  
+  height = 7,
+  
+  dpi = 300
+  
+)
+
+# ============================================================
+# NE MARKER INTERSECTION
+# ============================================================
+
+ne_genes <- c(
+  
+  "SCG2",
+  "SCG3",
+  "CHGB",
+  "NCAM1",
+  "SYP",
+  "ENO2",
+  "INSM1",
+  "DLL3",
+  "ASCL1"
+  
+)
+
+ne_overlap <- cor_table %>%
+  
+  filter(
+    
+    Gene %in% ne_genes
+    
+  ) %>%
+  
+  arrange(
+    
+    desc(abs(Rho))
+    
+  )
+
+write.csv(
+  
+  ne_overlap,
+  
+  file.path(
+    
+    network_dir,
+    
+    "Neuroendocrine_Gene_Overlap.csv"
+    
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# SUMMARY
+# ============================================================
+
+summary_table <- data.frame(
+  
+  Metric = c(
+    
+    "Tumors",
+    
+    "Genes",
+    
+    "Positive_Genes",
+    
+    "Negative_Genes"
+    
+  ),
+  
+  Value = c(
+    
+    ncol(expr_log2),
+    
+    nrow(expr_log2),
+    
+    nrow(top_positive),
+    
+    nrow(top_negative)
+    
+  )
+  
+)
+
+wb <- createWorkbook()
+
+addWorksheet(
+  wb,
+  "Summary"
+)
+
+writeData(
+  wb,
+  "Summary",
+  summary_table
+)
+
+addWorksheet(
+  wb,
+  "Top_Positive"
+)
+
+writeData(
+  wb,
+  "Top_Positive",
+  top_positive
+)
+
+addWorksheet(
+  wb,
+  "Top_Negative"
+)
+
+writeData(
+  wb,
+  "Top_Negative",
+  top_negative
+)
+
+addWorksheet(
+  wb,
+  "NE_Overlap"
+)
+
+writeData(
+  wb,
+  "NE_Overlap",
+  ne_overlap
+)
+
+saveWorkbook(
+  
+  wb,
+  
+  file.path(
+    
+    network_dir,
+    
+    "PINK1_Correlation_Report.xlsx"
+    
+  ),
+  
+  overwrite = TRUE
+  
+)
+
+# ============================================================
+# 04_TCGA-PAAD: GO, Reactome and Hallmark Enrichment
+# ============================================================
+
+suppressPackageStartupMessages({
+  
+  library(clusterProfiler)
+  library(org.Hs.eg.db)
+  library(ReactomePA)
+  library(msigdbr)
+  library(enrichplot)
+  
+  library(dplyr)
+  library(ggplot2)
+  library(stringr)
+  
+  library(GO.db)
+  library(openxlsx)
+  
+})
+
+# ============================================================
+# INPUT CHECKS
+# ============================================================
+
+if(!exists("expr_log2")){
+  stop("expr_log2 not found")
+}
+
+if(!"PINK1" %in% rownames(expr_log2)){
+  stop("PINK1 not found in expression matrix")
+}
+
+# ============================================================
+# OUTPUT DIRECTORY
+# ============================================================
+
+outdir <- "C:/Users/Martina/Desktop/New folder/results/TCGA-PAAD_analysis"
+
+enrichment_dir <- file.path(
+  outdir,
+  "04_Enrichment_Analysis"
+)
+
+dir.create(
+  enrichment_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+# ============================================================
+# DOTPLOT FUNCTION
+# ============================================================
+
+save_dotplot <- function(
+    enrich_obj,
+    filename,
+    title,
+    width = 3200,
+    height = 2400,
+    showCategory = 15
+){
+  
+  if(
+    is.null(enrich_obj) ||
+    nrow(as.data.frame(enrich_obj)) == 0
+  ){
+    return(NULL)
+  }
+  
+  p <- dotplot(
+    enrich_obj,
+    showCategory = showCategory
+  ) +
+    
+    scale_y_discrete(
+      labels = function(x)
+        stringr::str_wrap(
+          x,
+          width = 45
+        )
+    ) +
+    
+    ggtitle(title) +
+    
+    theme_bw(base_size = 14) +
+    
+    theme(
+      
+      axis.text.y = element_text(
+        size = 11
+      ),
+      
+      axis.text.x = element_text(
+        size = 12
+      ),
+      
+      plot.title = element_text(
+        size = 16,
+        face = "bold",
+        hjust = 0.5
+      )
+      
+    )
+  
+  png(
+    filename,
+    width = width,
+    height = height,
+    res = 300
+  )
+  
+  print(p)
+  
+  dev.off()
+  
+}
+
+# ============================================================
+# GENOME-WIDE PINK1 CORRELATION
+# ============================================================
+
+message("Running genome-wide correlation...")
+
+pink1_expr <- as.numeric(
+  expr_log2["PINK1", ]
+)
+
+all_genes <- rownames(expr_log2)
+
+corr_results <- lapply(
+  
+  all_genes,
+  
+  function(g){
+    
+    ct <- suppressWarnings(
+      
+      cor.test(
+        
+        pink1_expr,
+        
+        as.numeric(
+          expr_log2[g, ]
+        ),
+        
+        method = "spearman"
+        
+      )
+      
+    )
+    
+    data.frame(
+      
+      Gene = g,
+      
+      Rho = unname(ct$estimate),
+      
+      Pvalue = ct$p.value
+      
+    )
+    
+  }
+  
+) %>%
+  
+  bind_rows()
+
+corr_results <- corr_results %>%
+  
+  mutate(
+    
+    FDR = p.adjust(
+      Pvalue,
+      method = "BH"
+    )
+    
+  )
+
+write.csv(
+  
+  corr_results,
+  
+  file.path(
+    enrichment_dir,
+    "PINK1_GenomeWide_Correlations.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# SIGNIFICANT GENES
+# ============================================================
+
+pos_genes <- corr_results %>%
+  
+  filter(
+    Rho > 0,
+    FDR < 0.05
+  ) %>%
+  
+  pull(Gene)
+
+neg_genes <- corr_results %>%
+  
+  filter(
+    Rho < 0,
+    FDR < 0.05
+  ) %>%
+  
+  pull(Gene)
+
+cat(
+  "Positive genes:", length(pos_genes), "\n"
+)
+
+cat(
+  "Negative genes:", length(neg_genes), "\n"
+)
+
+# ============================================================
+# ENTREZ CONVERSION
+# ============================================================
+
+pos_entrez <- bitr(
+  
+  pos_genes,
+  
+  fromType = "SYMBOL",
+  
+  toType = "ENTREZID",
+  
+  OrgDb = org.Hs.eg.db
+  
+)
+
+neg_entrez <- bitr(
+  
+  neg_genes,
+  
+  fromType = "SYMBOL",
+  
+  toType = "ENTREZID",
+  
+  OrgDb = org.Hs.eg.db
+  
+)
+
+pos_entrez <- unique(pos_entrez)
+
+neg_entrez <- unique(neg_entrez)
+
+# ============================================================
+# GO BIOLOGICAL PROCESS
+# ============================================================
+
+message("Running GO enrichment...")
+
+go_pos <- enrichGO(
+  
+  gene = pos_entrez$ENTREZID,
+  
+  OrgDb = org.Hs.eg.db,
+  
+  keyType = "ENTREZID",
+  
+  ont = "BP",
+  
+  pAdjustMethod = "BH",
+  
+  pvalueCutoff = 0.05,
+  
+  qvalueCutoff = 0.05
+  
+)
+
+go_neg <- enrichGO(
+  
+  gene = neg_entrez$ENTREZID,
+  
+  OrgDb = org.Hs.eg.db,
+  
+  keyType = "ENTREZID",
+  
+  ont = "BP",
+  
+  pAdjustMethod = "BH",
+  
+  pvalueCutoff = 0.05
+  
+)
+
+write.csv(
+  as.data.frame(go_pos),
+  file.path(
+    enrichment_dir,
+    "GO_BP_Positive.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  as.data.frame(go_neg),
+  file.path(
+    enrichment_dir,
+    "GO_BP_Negative.csv"
+  ),
+  row.names = FALSE
+)
+
+save_dotplot(
+  go_pos,
+  file.path(
+    enrichment_dir,
+    "GO_BP_Positive_Dotplot.png"
+  ),
+  "GO Biological Process: Positive Correlations"
+)
+
+save_dotplot(
+  go_neg,
+  file.path(
+    enrichment_dir,
+    "GO_BP_Negative_Dotplot.png"
+  ),
+  "GO Biological Process: Negative Correlations"
+)
+
+# ============================================================
+# REACTOME
+# ============================================================
+
+message("Running Reactome enrichment...")
+
+reactome_pos <- enrichPathway(
+  
+  gene = pos_entrez$ENTREZID,
+  
+  organism = "human",
+  
+  pAdjustMethod = "BH",
+  
+  pvalueCutoff = 0.05
+  
+)
+
+reactome_neg <- enrichPathway(
+  
+  gene = neg_entrez$ENTREZID,
+  
+  organism = "human",
+  
+  pAdjustMethod = "BH",
+  
+  pvalueCutoff = 0.05
+  
+)
+
+write.csv(
+  
+  as.data.frame(reactome_pos),
+  
+  file.path(
+    enrichment_dir,
+    "Reactome_Positive.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+write.csv(
+  
+  as.data.frame(reactome_neg),
+  
+  file.path(
+    enrichment_dir,
+    "Reactome_Negative.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+save_dotplot(
+  reactome_pos,
+  file.path(
+    enrichment_dir,
+    "Reactome_Positive_Dotplot.png"
+  ),
+  "Reactome: Positive Correlations"
+)
+
+save_dotplot(
+  reactome_neg,
+  file.path(
+    enrichment_dir,
+    "Reactome_Negative_Dotplot.png"
+  ),
+  "Reactome: Negative Correlations"
+)
+
+# ============================================================
+# HALLMARK
+# ============================================================
+
+message("Running Hallmark enrichment...")
+
+hallmark <- msigdbr(
+  species = "Homo sapiens",
+  category = "H"
+)
+
+hallmark_t2g <- hallmark %>%
+  
+  select(
+    gs_name,
+    gene_symbol
+  )
+
+hallmark_pos <- enricher(
+  pos_genes,
+  TERM2GENE = hallmark_t2g
+)
+
+hallmark_neg <- enricher(
+  neg_genes,
+  TERM2GENE = hallmark_t2g
+)
+
+write.csv(
+  
+  as.data.frame(hallmark_pos),
+  
+  file.path(
+    enrichment_dir,
+    "Hallmark_Positive.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+write.csv(
+  
+  as.data.frame(hallmark_neg),
+  
+  file.path(
+    enrichment_dir,
+    "Hallmark_Negative.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+save_dotplot(
+  hallmark_pos,
+  file.path(
+    enrichment_dir,
+    "Hallmark_Positive_Dotplot.png"
+  ),
+  "Hallmark: Positive Correlations"
+)
+
+save_dotplot(
+  hallmark_neg,
+  file.path(
+    enrichment_dir,
+    "Hallmark_Negative_Dotplot.png"
+  ),
+  "Hallmark: Negative Correlations"
+)
+
+# ============================================================
+# SUMMARY TABLE
+# ============================================================
+
+summary_df <- data.frame(
+  
+  Positive_Genes = length(pos_genes),
+  
+  Negative_Genes = length(neg_genes),
+  
+  GO_Positive =
+    nrow(as.data.frame(go_pos)),
+  
+  GO_Negative =
+    nrow(as.data.frame(go_neg)),
+  
+  Reactome_Positive =
+    nrow(as.data.frame(reactome_pos)),
+  
+  Reactome_Negative =
+    nrow(as.data.frame(reactome_neg)),
+  
+  Hallmark_Positive =
+    nrow(as.data.frame(hallmark_pos)),
+  
+  Hallmark_Negative =
+    nrow(as.data.frame(hallmark_neg))
+  
+)
+
+write.csv(
+  
+  summary_df,
+  
+  file.path(
+    enrichment_dir,
+    "Enrichment_Summary.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# EXCEL REPORT
+# ============================================================
+
+wb <- createWorkbook()
+
+addWorksheet(wb, "GO_Positive")
+writeData(wb, "GO_Positive", as.data.frame(go_pos))
+
+addWorksheet(wb, "GO_Negative")
+writeData(wb, "GO_Negative", as.data.frame(go_neg))
+
+addWorksheet(wb, "Reactome_Positive")
+writeData(wb, "Reactome_Positive", as.data.frame(reactome_pos))
+
+addWorksheet(wb, "Reactome_Negative")
+writeData(wb, "Reactome_Negative", as.data.frame(reactome_neg))
+
+addWorksheet(wb, "Hallmark_Positive")
+writeData(wb, "Hallmark_Positive", as.data.frame(hallmark_pos))
+
+addWorksheet(wb, "Hallmark_Negative")
+writeData(wb, "Hallmark_Negative", as.data.frame(hallmark_neg))
+
+saveWorkbook(
+  
+  wb,
+  
+  file.path(
+    enrichment_dir,
+    "Functional_Enrichment_Report.xlsx"
+  ),
+  
+  overwrite = TRUE
+  
+)
+
+message("Enrichment analysis completed successfully.")
+
+# ============================================================
+# 05_TCGA-PAAD: GSEA
+# PINK1-centered genome-wide analysis
+# ============================================================
+
+suppressPackageStartupMessages({
+  
+  library(clusterProfiler)
+  library(org.Hs.eg.db)
+  library(ReactomePA)
+  library(msigdbr)
+  
+  library(dplyr)
+  library(ggplot2)
+  library(enrichplot)
+  
+  library(openxlsx)
+  
+})
+
+# ============================================================
+# INPUT CHECKS
+# ============================================================
+
+if(!exists("expr_log2")){
+  stop("expr_log2 not found")
+}
+
+if(!"PINK1" %in% rownames(expr_log2)){
+  stop("PINK1 not found")
+}
+
+# ============================================================
+# OUTPUT DIRECTORY
+# ============================================================
+
+gsea_dir <- file.path(
+  outdir,
+  "05_GSEA"
+)
+
+dir.create(
+  gsea_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+# ============================================================
+# PINK1 CORRELATIONS
+# ============================================================
+
+message("Computing genome-wide Spearman correlations...")
+
+pink1 <- as.numeric(
+  expr_log2["PINK1", ]
+)
+
+genes <- rownames(expr_log2)
+
+corr_results <- lapply(
+  
+  genes,
+  
+  function(g){
+    
+    ct <- suppressWarnings(
+      
+      cor.test(
+        pink1,
+        as.numeric(expr_log2[g, ]),
+        method = "spearman"
+      )
+      
+    )
+    
+    data.frame(
+      Gene = g,
+      Rho = unname(ct$estimate),
+      Pvalue = ct$p.value
+    )
+    
+  }
+  
+) %>%
+  
+  bind_rows()
+
+corr_results <- corr_results %>%
+  
+  mutate(
+    FDR = p.adjust(
+      Pvalue,
+      method = "BH"
+    )
+  )
+
+write.csv(
+  
+  corr_results,
+  
+  file.path(
+    gsea_dir,
+    "PINK1_Correlations.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# ENTREZ CONVERSION
+# ============================================================
+
+gene_map <- bitr(
+  
+  corr_results$Gene,
+  
+  fromType = "SYMBOL",
+  
+  toType = "ENTREZID",
+  
+  OrgDb = org.Hs.eg.db
+  
+)
+
+ranked_df <- corr_results %>%
+  
+  inner_join(
+    gene_map,
+    by = c("Gene" = "SYMBOL")
+  ) %>%
+  
+  distinct(
+    ENTREZID,
+    .keep_all = TRUE
+  )
+
+# ============================================================
+# RANKED VECTOR
+# ============================================================
+
+geneList <- ranked_df$Rho
+
+names(geneList) <- ranked_df$ENTREZID
+
+geneList <- sort(
+  geneList,
+  decreasing = TRUE
+)
+
+write.csv(
+  
+  data.frame(
+    ENTREZID = names(geneList),
+    Rho = geneList
+  ),
+  
+  file.path(
+    gsea_dir,
+    "PINK1_GSEA_Ranked_Genes.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# GSEA GO BIOLOGICAL PROCESS
+# ============================================================
+
+message("Running GO-GSEA...")
+
+gsea_go <- gseGO(
+  
+  geneList = geneList,
+  
+  OrgDb = org.Hs.eg.db,
+  
+  ont = "BP",
+  
+  keyType = "ENTREZID",
+  
+  minGSSize = 15,
+  
+  maxGSSize = 500,
+  
+  pvalueCutoff = 0.05,
+  
+  verbose = FALSE
+  
+)
+
+write.csv(
+  
+  as.data.frame(gsea_go),
+  
+  file.path(
+    gsea_dir,
+    "GSEA_GO_BP.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# GSEA REACTOME
+# ============================================================
+
+message("Running Reactome-GSEA...")
+
+gsea_reactome <- gsePathway(
+  
+  geneList = geneList,
+  
+  organism = "human",
+  
+  minGSSize = 15,
+  
+  maxGSSize = 500,
+  
+  pvalueCutoff = 0.05,
+  
+  verbose = FALSE
+  
+)
+
+write.csv(
+  
+  as.data.frame(gsea_reactome),
+  
+  file.path(
+    gsea_dir,
+    "GSEA_Reactome.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# GSEA HALLMARK
+# ============================================================
+
+message("Running Hallmark-GSEA...")
+
+hallmark <- msigdbr(
+  species = "Homo sapiens",
+  category = "H"
+)
+
+hallmark_t2g <- hallmark %>%
+  
+  select(
+    gs_name,
+    gene_symbol
+  )
+
+hallmark_entrez <- hallmark_t2g %>%
+  
+  inner_join(
+    gene_map,
+    by = c(
+      "gene_symbol" = "SYMBOL"
+    )
+  ) %>%
+  
+  select(
+    gs_name,
+    ENTREZID
+  )
+
+gsea_hallmark <- GSEA(
+  
+  geneList,
+  
+  TERM2GENE = hallmark_entrez,
+  
+  minGSSize = 15,
+  
+  maxGSSize = 500,
+  
+  pvalueCutoff = 0.05,
+  
+  verbose = FALSE
+  
+)
+
+write.csv(
+  
+  as.data.frame(gsea_hallmark),
+  
+  file.path(
+    gsea_dir,
+    "GSEA_Hallmark.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# DOTPLOTS
+# ============================================================
+
+png(
+  file.path(
+    gsea_dir,
+    "GSEA_GO_Dotplot.png"
+  ),
+  width = 3200,
+  height = 2800,
+  res = 300
+)
+
+print(
+  dotplot(
+    gsea_go,
+    showCategory = 20
+  )
+)
+
+dev.off()
+
+
+
+png(
+  file.path(
+    gsea_dir,
+    "GSEA_Reactome_Dotplot.png"
+  ),
+  width = 3200,
+  height = 2800,
+  res = 300
+)
+
+print(
+  dotplot(
+    gsea_reactome,
+    showCategory = 20
+  )
+)
+
+dev.off()
+
+
+
+png(
+  file.path(
+    gsea_dir,
+    "GSEA_Hallmark_Dotplot.png"
+  ),
+  width = 3200,
+  height = 2400,
+  res = 300
+)
+
+print(
+  dotplot(
+    gsea_hallmark,
+    showCategory = 20
+  )
+)
+
+dev.off()
+
+# ============================================================
+# TOP ENRICHMENT PLOTS
+# ============================================================
+
+if(nrow(as.data.frame(gsea_go)) > 0){
+  
+  top_term <- gsea_go@result$ID[1]
+  
+  png(
+    file.path(
+      gsea_dir,
+      "Top_GO_Enrichment.png"
+    ),
+    width = 2200,
+    height = 1800,
+    res = 300
+  )
+  
+  print(
+    gseaplot2(
+      gsea_go,
+      geneSetID = top_term
+    )
+  )
+  
+  dev.off()
+  
+}
+
+# ============================================================
+# EXCEL REPORT
+# ============================================================
+
+wb <- createWorkbook()
+
+addWorksheet(wb,"GO")
+writeData(
+  wb,
+  "GO",
+  as.data.frame(gsea_go)
+)
+
+addWorksheet(wb,"Reactome")
+writeData(
+  wb,
+  "Reactome",
+  as.data.frame(gsea_reactome)
+)
+
+addWorksheet(wb,"Hallmark")
+writeData(
+  wb,
+  "Hallmark",
+  as.data.frame(gsea_hallmark)
+)
+
+saveWorkbook(
+  
+  wb,
+  
+  file.path(
+    gsea_dir,
+    "PINK1_GSEA_Report.xlsx"
+  ),
+  
+  overwrite = TRUE
+  
+)
+
+message("GSEA completed successfully.")
+
+
+# ============================================================
+# 06_TCGA-PAAD: PINK1 ANALYSIS
+# ============================================================
+
+list.files(
+  tcga_dir,
+  recursive = TRUE,
+  full.names = TRUE,
+  pattern = "json|tsv|csv"
+)
+
+suppressPackageStartupMessages({
+  
+  library(data.table)
+  library(dplyr)
+  
+  library(DESeq2)
+  
+  library(ggplot2)
+  library(EnhancedVolcano)
+  
+  library(ComplexHeatmap)
+  library(circlize)
+  
+  library(survival)
+  
+  library(openxlsx)
+  library(broom)
+  
+})
+
+# ============================================================
+# INPUT FILES
+# ============================================================
+
+tcga_dir <- "C:/Users/Martina/Desktop/TCGA/rawdata/0_TCGA-panCancer/GDCdata/TCGA-PAAD"
+
+expr_files <- list.files(
+  tcga_dir,
+  pattern = "star_gene_counts",
+  recursive = TRUE,
+  full.names = TRUE
+)
+
+if(length(expr_files) == 0){
+  stop("No STAR files found")
+}
+
+# ============================================================
+# READ DATA
+# ============================================================
+
+expr_list <- list()
+count_list <- list()
+
+for(f in expr_files){
+  
+  x <- fread(f)
+  
+  sample_name <- substr(
+    basename(f),
+    1,
+    15
+  )
+  
+  expr_list[[sample_name]] <- x %>%
+    select(
+      gene_name,
+      tpm_unstranded
+    )
+  
+  count_list[[sample_name]] <- x %>%
+    select(
+      gene_name,
+      unstranded
+    )
+  
+}
+
+# ============================================================
+# TPM MATRIX
+# ============================================================
+
+genes <- expr_list[[1]]$gene_name
+
+expr_mat <- data.frame(
+  gene = genes
+)
+
+for(i in names(expr_list)){
+  
+  expr_mat[[i]] <- expr_list[[i]]$tpm_unstranded
+  
+}
+
+expr_mat <- expr_mat[
+  expr_mat$gene != "",
+]
+
+expr_mat <- expr_mat[
+  !duplicated(expr_mat$gene),
+]
+
+rownames(expr_mat) <- expr_mat$gene
+
+expr_mat$gene <- NULL
+
+expr_log2 <- log2(expr_mat + 1)
+
+# ============================================================
+# COUNT MATRIX
+# ============================================================
+
+genes <- count_list[[1]]$gene_name
+
+count_matrix <- data.frame(
+  gene = genes
+)
+
+for(i in names(count_list)){
+  
+  count_matrix[[i]] <- count_list[[i]]$unstranded
+  
+}
+
+count_matrix <- count_matrix[
+  count_matrix$gene != "",
+]
+
+count_matrix <- count_matrix[
+  !duplicated(count_matrix$gene),
+]
+
+rownames(count_matrix) <- count_matrix$gene
+
+count_matrix$gene <- NULL
+
+# ============================================================
+# CHECKS
+# ============================================================
+
+cat(
+  "Genes:", nrow(expr_log2),
+  "\nSamples:", ncol(expr_log2),
+  "\n"
+)
+
+if(!"PINK1" %in% rownames(expr_log2)){
+  stop("PINK1 not found")
+}
+
+# ============================================================
+# OUTPUT DIRECTORY
+# ============================================================
+
+outdir <- "C:/Users/Martina/Desktop/New folder/results/TCGA-PAAD_analysis"
+
+pink1_dir <- file.path(
+  outdir,
+  "06_PINK1_Analysis"
+)
+
+dir.create(
+  pink1_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+# ============================================================
+# PINK1 EXPRESSION
+# ============================================================
+
+pink1_expr <- as.numeric(
+  expr_log2["PINK1", ]
+)
+
+pink_df <- data.frame(
+  
+  Sample = colnames(expr_log2),
+  
+  PINK1 = pink1_expr
+  
+)
+
+write.csv(
+  pink_df,
+  file.path(
+    pink1_dir,
+    "PINK1_Expression_Table.csv"
+  ),
+  row.names = FALSE
+)
+
+# ============================================================
+# BOXPLOT
+# ============================================================
+
+p <- ggplot(
+  
+  pink_df,
+  
+  aes(
+    x = "",
+    y = PINK1
+  )
+  
+) +
+  
+  geom_boxplot(
+    fill = "#F4A6C1",
+    alpha = 0.8
+  ) +
+  
+  geom_jitter(
+    width = 0.2,
+    size = 2
+  ) +
+  
+  theme_bw() +
+  
+  labs(
+    title = "PINK1 Expression in TCGA-PAAD",
+    x = "",
+    y = "log2(TPM + 1)"
+  )
+
+ggsave(
+  file.path(
+    pink1_dir,
+    "PINK1_Boxplot.png"
+  ),
+  p,
+  width = 6,
+  height = 5
+)
+
+# ============================================================
+# HIGH / LOW GROUPS
+# ============================================================
+
+median_pink1 <- median(
+  pink1_expr,
+  na.rm = TRUE
+)
+
+group <- ifelse(
+  pink1_expr >= median_pink1,
+  "High",
+  "Low"
+)
+
+group_df <- data.frame(
+  
+  Sample = colnames(expr_log2),
+  
+  Group = group
+  
+)
+
+write.csv(
+  group_df,
+  file.path(
+    pink1_dir,
+    "Sample_Groups.csv"
+  ),
+  row.names = FALSE
+)
+
+# ============================================================
+# DESEQ2 CACHE
+# ============================================================
+
+dds_file <- file.path(
+  pink1_dir,
+  "PINK1_DESeq2_Object.rds"
+)
+
+res_file <- file.path(
+  pink1_dir,
+  "PINK1_DESeq2_Results.rds"
+)
+
+vsd_file <- file.path(
+  pink1_dir,
+  "PINK1_VST_Object.rds"
+)
+
+norm_file <- file.path(
+  pink1_dir,
+  "PINK1_Normalized_Counts.rds"
+)
+
+if(
+  file.exists(dds_file) &
+  file.exists(res_file) &
+  file.exists(vsd_file)
+){
+  
+  message(
+    "Loading existing DESeq2 objects..."
+  )
+  
+  dds <- readRDS(dds_file)
+  
+  res <- readRDS(res_file)
+  
+  vsd <- readRDS(vsd_file)
+  
+  norm_counts <- readRDS(norm_file)
+  
+} else {
+  
+  dds <- DESeqDataSetFromMatrix(
+    
+    countData = round(count_matrix),
+    
+    colData = data.frame(
+      
+      row.names = colnames(count_matrix),
+      
+      group = factor(group)
+      
+    ),
+    
+    design = ~ group
+    
+  )
+  
+  dds <- DESeq(dds)
+  
+  res <- results(
+    
+    dds,
+    
+    contrast = c(
+      "group",
+      "High",
+      "Low"
+    )
+    
+  )
+  
+  vsd <- vst(
+    dds,
+    blind = FALSE
+  )
+  
+  norm_counts <- counts(
+    dds,
+    normalized = TRUE
+  )
+  
+  saveRDS(
+    dds,
+    dds_file
+  )
+  
+  saveRDS(
+    res,
+    res_file
+  )
+  
+  saveRDS(
+    vsd,
+    vsd_file
+  )
+  
+  saveRDS(
+    norm_counts,
+    norm_file
+  )
+  
+}
+
+# ============================================================
+# EXPORT RESULTS
+# ============================================================
+
+res_df <- as.data.frame(res)
+
+res_df$gene <- rownames(res_df)
+
+res_df <- res_df %>%
+  arrange(padj)
+
+write.csv(
+  
+  res_df,
+  
+  file.path(
+    pink1_dir,
+    "PINK1_DEGs.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+vst_mat <- assay(vsd)
+
+write.csv(
+  
+  vst_mat,
+  
+  file.path(
+    pink1_dir,
+    "PINK1_VST_Matrix.csv"
+  )
+  
+)
+
+write.csv(
+  
+  norm_counts,
+  
+  file.path(
+    pink1_dir,
+    "PINK1_Normalized_Counts.csv"
+  )
+  
+)
+
+# ============================================================
+# VOLCANO
+# ============================================================
+
+png(
+  file.path(
+    pink1_dir,
+    "PINK1_Volcano.png"
+  ),
+  width = 2200,
+  height = 1800,
+  res = 300
+)
+
+EnhancedVolcano(
+  
+  res_df,
+  
+  lab = res_df$gene,
+  
+  x = "log2FoldChange",
+  
+  y = "padj",
+  
+  pCutoff = 0.05,
+  
+  FCcutoff = 1,
+  
+  pointSize = 2,
+  
+  labSize = 3,
+  
+  title = "PINK1 High vs Low"
+  
+)
+
+dev.off()
+
+# ============================================================
+# CORRELATIONS
+# ============================================================
+
+cors <- apply(
+  
+  expr_log2,
+  
+  1,
+  
+  function(x){
+    
+    if(
+      sd(x, na.rm = TRUE) == 0
+    ){
+      return(NA)
+    }
+    
+    cor(
+      
+      x,
+      
+      pink1_expr,
+      
+      method = "spearman",
+      
+      use = "pairwise.complete.obs"
+      
+    )
+    
+  }
+  
+)
+
+cor_df <- data.frame(
+  
+  Gene = names(cors),
+  
+  SpearmanR = cors
+  
+)
+
+cor_df <- cor_df %>%
+  
+  filter(
+    !is.na(SpearmanR)
+  ) %>%
+  
+  arrange(
+    desc(abs(SpearmanR))
+  )
+
+write.csv(
+  cor_df,
+  file.path(
+    pink1_dir,
+    "PINK1_Correlations.csv"
+  ),
+  row.names = FALSE
+)
+
+# ============================================================
+# HEATMAP
+# ============================================================
+
+top_pos <- cor_df %>%
+  arrange(desc(SpearmanR)) %>%
+  head(25)
+
+top_neg <- cor_df %>%
+  arrange(SpearmanR) %>%
+  head(25)
+
+top_genes <- c(
+  top_pos$Gene,
+  top_neg$Gene
+)
+
+heat_matrix <- expr_log2[
+  top_genes,
+]
+
+png(
+  file.path(
+    pink1_dir,
+    "PINK1_TopCorrelated_Heatmap.png"
+  ),
+  width = 3200,
+  height = 2800,
+  res = 300
+)
+
+draw(
+  
+  Heatmap(
+    
+    as.matrix(heat_matrix),
+    
+    name = "log2(TPM+1)",
+    
+    col = colorRamp2(
+      
+      c(
+        min(heat_matrix),
+        median(as.matrix(heat_matrix)),
+        max(heat_matrix)
+      ),
+      
+      c(
+        "#2166AC",
+        "white",
+        "#B2182B"
+      )
+      
+    ),
+    
+    cluster_rows = TRUE,
+    
+    cluster_columns = TRUE,
+    
+    row_names_gp = grid::gpar(
+      fontsize = 8
+    ),
+    
+    column_names_gp = grid::gpar(
+      fontsize = 8
+    )
+    
+  )
+  
+)
+
+dev.off()
+
+# ============================================================
+# SURVIVAL ANALYSIS
+# ============================================================
+
+clinical_file <- file.path(
+  outdir,
+  "clinical.csv"
+)
+
+if(file.exists(clinical_file)){
+  
+  clinical <- read.csv(
+    clinical_file
+  )
+  
+  clinical$Group <- group[
+    match(
+      clinical$Sample,
+      colnames(expr_log2)
+    )
+  ]
+  
+  fit <- survfit(
+    
+    Surv(
+      OS_time,
+      OS_status
+    ) ~ Group,
+    
+    data = clinical
+    
+  )
+  
+  png(
+    file.path(
+      pink1_dir,
+      "PINK1_Kaplan_Meier.png"
+    ),
+    width = 2200,
+    height = 1800,
+    res = 300
+  )
+  
+  plot(
+    fit,
+    col = c("#1F77B4", "#D62728"),
+    lwd = 3,
+    xlab = "Time",
+    ylab = "Overall Survival",
+    main = "PINK1 High vs Low"
+  )
+  
+  legend(
+    "bottomleft",
+    legend = c("Low","High"),
+    col = c("#1F77B4","#D62728"),
+    lwd = 3,
+    bty = "n"
+  )
+  
+  dev.off()
+  
+  cox_model <- coxph(
+    
+    Surv(
+      OS_time,
+      OS_status
+    ) ~ Group,
+    
+    data = clinical
+    
+  )
+  
+  write.csv(
+    
+    broom::tidy(cox_model),
+    
+    file.path(
+      pink1_dir,
+      "PINK1_CoxPH.csv"
+    ),
+    
+    row.names = FALSE
+    
+  )
+  
+}
+
+# ============================================================
+# EXCEL REPORT
+# ============================================================
+
+wb <- createWorkbook()
+
+addWorksheet(wb,"Expression")
+writeData(wb,"Expression",pink_df)
+
+addWorksheet(wb,"Groups")
+writeData(wb,"Groups",group_df)
+
+addWorksheet(wb,"DEGs")
+writeData(wb,"DEGs",res_df)
+
+addWorksheet(wb,"Correlations")
+writeData(wb,"Correlations",cor_df)
+
+saveWorkbook(
+  
+  wb,
+  
+  file.path(
+    pink1_dir,
+    "PINK1_Analysis_Report.xlsx"
+  ),
+  
+  overwrite = TRUE
+  
+)
+
+cat(
+  "\nPINK1 analysis completed successfully.\n"
+)
+
+############################################################
+# 07_TCGA-PAAD RNA-seq Analysis
+# Differential expression + visualization
+############################################################
+
+library(pheatmap)
+library(DESeq2)
+library(SummarizedExperiment)
+library(ggplot2)
+library(pheatmap)
+library(ggrepel)
+library(dplyr)
+library(openxlsx)
+library(RColorBrewer)
+
+############################################################
+# directory
+############################################################
+
+dir.create(
+  "C:/Users/Martina/Desktop/New folder/results/TCGA-PAAD_analysis/07_PrimaryvsNormal",
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+setwd("C:/Users/Martina/Desktop/New folder/results/TCGA-PAAD_analysis/07_PrimaryvsNormal")
+getwd()
+
+############################################################
+# Load data
+############################################################
+
+data <- readRDS("../rawdata/TCGA_PAAD_STAR_Counts.rds")
+dds <- readRDS("../rawdata/dds.rds")
+res_df <- readRDS("../rawdata/res_df.rds")
+sig_genes <- readRDS("../rawdata/sig_genes.rds")
+sample_info <- readRDS("../rawdata/sample_info.rds")
+vsd <- vst(dds)
+
+############################################################
+# Save Excel
+############################################################
+
+wb <- createWorkbook()
+
+addWorksheet(wb,"All_Genes")
+addWorksheet(wb,"Significant_Genes")
+
+writeData(wb,"All_Genes",res_df)
+writeData(wb,"Significant_Genes",sig_genes)
+
+saveWorkbook(
+  wb,
+  "TCGA_PAAD_DESeq2_Results.xlsx",
+  overwrite = TRUE
+)
+
+############################################################
+# Volcano Plot
+############################################################
+
+library(ggplot2)
+library(ggrepel)
+
+res_df$Status <- "NS"
+
+res_df$Status[
+  res_df$padj < 0.05 &
+    res_df$log2FoldChange > 1
+] <- "Up"
+
+res_df$Status[
+  res_df$padj < 0.05 &
+    res_df$log2FoldChange < -1
+] <- "Down"
+
+volcano <- ggplot(
+  res_df,
+  aes(
+    x = log2FoldChange,
+    y = -log10(padj),
+    color = Status
+  )
+) +
+  geom_point(
+    size = 2,
+    alpha = 0.7
+  ) +
+  geom_vline(
+    xintercept = c(-1, 1),
+    linetype = "dashed",
+    color = "black"
+  ) +
+  geom_hline(
+    yintercept = -log10(0.05),
+    linetype = "dashed",
+    color = "black"
+  ) +
+  geom_point(
+    data = subset(
+      res_df,
+      gene_name == "PINK1"
+    ),
+    color = "gold",
+    size = 5
+  ) +
+  geom_text_repel(
+    data = subset(
+      res_df,
+      gene_name == "PINK1"
+    ),
+    aes(label = gene_name),
+    color = "red",
+    size = 6,
+    fontface = "bold"
+  ) +
+  scale_color_manual(
+    values = c(
+      "Up" = "#D73027",
+      "Down" = "#4575B4",
+      "NS" = "grey80"
+    )
+  ) +
+  theme_classic(base_size = 14) +
+  labs(
+    title = "TCGA-PAAD: Primary Tumor vs Normal",
+    subtitle = paste(
+      nrow(sig_genes),
+      "Significantly Differentially Expressed Genes"
+    ),
+    x = expression(log[2]~Fold~Change),
+    y = expression(-log[10]~FDR)
+  ) +
+  theme(
+    plot.title = element_text(
+      face = "bold",
+      hjust = 0.5
+    ),
+    legend.title = element_blank()
+  )
+
+print(volcano)
+
+ggsave(
+  filename = "Volcano_TCGA-PAAD_PINK1.png",
+  plot = volcano,
+  width = 9,
+  height = 7,
+  dpi = 600
+)
+
+############################################################
+# PCA
+############################################################
+
+pca <- prcomp(
+  t(assay(vsd)),
+  scale. = FALSE
+)
+
+pca_df <- data.frame(
+  PC1 = pca$x[,1],
+  PC2 = pca$x[,2],
+  Group = colData(vsd)$group
+)
+
+percentVar <- round(
+  100 * (pca$sdev^2 / sum(pca$sdev^2))
+)
+
+pca_plot <- ggplot(
+  pca_df,
+  aes(
+    PC1,
+    PC2,
+    color = Group
+  )
+) +
+  geom_point(
+    size = 4,
+    alpha = 0.8
+  ) +
+  scale_color_manual(
+    values = c(
+      "Normal" = "#4DBBD5",
+      "Tumor" = "#E64B35"
+    )
+  ) +
+  theme_classic(base_size = 14) +
+  labs(
+    title = "TCGA-PAAD PCA",
+    x = paste0(
+      "PC1 (",
+      percentVar[1],
+      "%)"
+    ),
+    y = paste0(
+      "PC2 (",
+      percentVar[2],
+      "%)"
+    )
+  ) +
+  theme(
+    plot.title = element_text(
+      face = "bold",
+      hjust = 0.5
+    )
+  )
+
+print(pca_plot)
+
+ggsave(
+  "PCA_TCGA_PAAD.png",
+  pca_plot,
+  width = 8,
+  height = 6,
+  dpi = 600
+)
+
+ggsave(
+  "PCA_TCGA_PAAD.pdf",
+  pca_plot,
+  width = 8,
+  height = 6
+)
+
+########################################################################
+# Top 50/15/10 significant genes heatmaps in tumour vs normal tissue
+########################################################################
+
+make_heatmap <- function(n_genes, filename){
+  
+  # top genes by significance
+  top_genes <- rownames(head(sig_genes, n_genes))
+  
+  # expression matrix
+  mat <- SummarizedExperiment::assay(vsd)[top_genes, ]
+  
+  # z-score normalization
+  mat <- t(scale(t(mat)))
+  
+  # replace ENSG IDs with gene symbols
+  gene_symbols <- sig_genes[
+    match(top_genes, rownames(sig_genes)),
+    "gene_name"
+  ]
+  
+  rownames(mat) <- gene_symbols
+  
+  # sample annotation
+  annotation <- data.frame(
+    Group = sample_info$group
+  )
+  
+  rownames(annotation) <- colnames(mat)
+  
+  ann_colors <- list(
+    Group = c(
+      Normal = "#4DBBD5",
+      Tumor = "#E64B35"
+    )
+  )
+  
+  pheatmap(
+    mat,
+    annotation_col = annotation,
+    annotation_colors = ann_colors,
+    
+    cluster_rows = TRUE,
+    cluster_cols = TRUE,
+    
+    show_colnames = FALSE,
+    border_color = NA,
+    
+    fontsize_row = 10,
+    
+    color = colorRampPalette(
+      c(
+        "#2166AC",
+        "white",
+        "#B2182B"
+      )
+    )(100),
+    
+    main = paste(
+      "TCGA-PAAD Top",
+      n_genes,
+      "Differentially Expressed Genes"
+    ),
+    
+    filename = filename,
+    width = 10,
+    height = 10
+  )
+}
+make_heatmap(
+  10,
+  "Heatmap_Top10_SigGenes_TvsN.png"
+)
+
+make_heatmap(
+  15,
+  "Heatmap_Top15_SignGenes_TvsN.png"
+)
+
+make_heatmap(
+  50,
+  "Heatmap_Top50_SignGenes_TvsN.png"
+)
+write.csv(
+  head(sig_genes, 10),
+  "Top10_Significant_Genes_TvsN.csv"
+)
+
+write.csv(
+  head(sig_genes, 15),
+  "Top15_Significant_Genes_TvsN.csv"
+)
+
+write.csv(
+  head(sig_genes, 50),
+  "Top50_Significant_Genes_TvsN.csv"
+)
+
+############################################################
+# PINK1 SPECIFIC ANALYSIS
+############################################################
+
+# Find PINK1 row
+pink1_row <- which(rowData(data)$gene_name == "PINK1")
+
+# Check that PINK1 exists
+pink1_row
+
+# Show DESeq2 result for PINK1
+pink1_res <- res_df[
+  res_df$gene_name == "PINK1",
+  c(
+    "gene_name",
+    "baseMean",
+    "log2FoldChange",
+    "lfcSE",
+    "stat",
+    "pvalue",
+    "padj"
+  )
+]
+
+print(pink1_res)
+
+write.csv(
+  pink1_res,
+  "PINK1_DESeq2_result.csv",
+  row.names = TRUE
+)
+
+############################################################
+# PINK1 EXPRESSION
+############################################################
+
+# Extract VST-normalized expression
+pink1_expr <- assay(vsd)[pink1_row, ]
+
+# Create dataframe
+pink1_df <- data.frame(
+  Expression = as.numeric(pink1_expr),
+  Group = colData(vsd)$group
+)
+
+############################################################
+# STATISTICS
+############################################################
+
+pink1_test <- wilcox.test(
+  Expression ~ Group,
+  data = pink1_df
+)
+
+print(pink1_test)
+
+############################################################
+# SAVE STATISTICS
+############################################################
+
+capture.output(
+  pink1_test,
+  file = "PINK1_Wilcoxon_statistics.txt"
+)
+
+write.csv(
+  pink1_df,
+  "PINK1_expression_values.csv",
+  row.names = FALSE
+)
+
+############################################################
+# PINK1 BOXPLOT
+############################################################
+
+library(ggplot2)
+
+pink1_plot <- ggplot(
+  pink1_df,
+  aes(
+    x = Group,
+    y = Expression,
+    fill = Group
+  )
+) +
+  geom_boxplot(
+    width = 0.6,
+    alpha = 0.8,
+    outlier.shape = NA
+  ) +
+  geom_jitter(
+    width = 0.15,
+    size = 2,
+    alpha = 0.7
+  ) +
+  scale_fill_manual(
+    values = c(
+      "Normal" = "#4DBBD5",
+      "Tumor" = "#E64B35"
+    )
+  ) +
+  annotate(
+    "text",
+    x = 1.5,
+    y = max(pink1_df$Expression) * 1.05,
+    label = paste0(
+      "Wilcoxon p = ",
+      signif(pink1_test$p.value, 3)
+    ),
+    size = 5
+  ) +
+  theme_classic(base_size = 14) +
+  labs(
+    title = "PINK1 Expression in TCGA-PAAD",
+    subtitle = paste(
+      "Tumor (n =",
+      sum(pink1_df$Group == "Tumor"),
+      ") vs Normal (n =",
+      sum(pink1_df$Group == "Normal"),
+      ")"
+    ),
+    x = "",
+    y = "VST-normalized expression"
+  )
+
+print(pink1_plot)
+
+ggsave(
+  "PINK1_Boxplot.png",
+  pink1_plot,
+  width = 7,
+  height = 6,
+  dpi = 600
+)
+                
+############################################################
+# PINK1 location in DESeq2
+############################################################
+
+pink1_res <- res_df[
+  res_df$gene_name == "PINK1",
+]
+
+write.csv(
+  pink1_res,
+  "PINK1_DESeq2_result.csv",
+  row.names = FALSE
+)
+
+############################################################
+# Session info
+############################################################
+
+writeLines(
+  capture.output(sessionInfo()),
+  "sessionInfo.txt"
+)
+
+############################################################
+# 08_TCGA-PAAD_Survival_Analysis
+# PINK1 Kaplan-Meier + Cox Regression with optimal cutoff
+############################################################
+
+library(DESeq2)
+library(SummarizedExperiment)
+library(survival)
+library(maxstat)
+library(ggplot2)
+
+############################################################
+# Directory
+############################################################
+
+dir.create(
+  "C:/Users/Martina/Desktop/New folder/results/TCGA-PAAD_analysis/08_PINK1_Survival",
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+setwd(
+  "C:/Users/Martina/Desktop/New folder/results/TCGA-PAAD_analysis/08_PINK1_Survival"
+)
+
+############################################################
+# Load data
+############################################################
+
+data <- readRDS(
+  "../rawdata/TCGA_PAAD_STAR_Counts.rds"
+)
+
+dds <- readRDS(
+  "../rawdata/dds.rds"
+)
+
+############################################################
+# Variance stabilized expression
+############################################################
+
+vsd <- varianceStabilizingTransformation(
+  dds,
+  blind = FALSE
+)
+
+############################################################
+# PINK1
+############################################################
+
+pink1_row <- which(
+  rowData(data)$gene_name == "PINK1"
+)
+
+if(length(pink1_row) == 0){
+  stop("PINK1 not found.")
+}
+
+pink1_expr <- SummarizedExperiment::assay(vsd)[
+  pink1_row,
+]
+
+############################################################
+# Clinical data
+############################################################
+
+clinical <- as.data.frame(
+  colData(data)
+)
+
+############################################################
+# Match samples
+############################################################
+
+common_samples <- intersect(
+  names(pink1_expr),
+  rownames(clinical)
+)
+
+clinical <- clinical[
+  common_samples,
+]
+
+pink1_expr <- pink1_expr[
+  common_samples
+]
+
+############################################################
+# Survival dataframe
+############################################################
+
+surv_df <- data.frame(
+  Sample = common_samples,
+  PINK1 = as.numeric(pink1_expr),
+  days_to_death =
+    clinical$days_to_death,
+  days_to_last_follow_up =
+    clinical$days_to_last_follow_up,
+  vital_status =
+    clinical$vital_status
+)
+
+############################################################
+# Overall survival
+############################################################
+
+surv_df$OS_time <- ifelse(
+  !is.na(surv_df$days_to_death),
+  surv_df$days_to_death,
+  surv_df$days_to_last_follow_up
+)
+
+surv_df$OS_event <- ifelse(
+  surv_df$vital_status == "Dead",
+  1,
+  0
+)
+
+surv_df <- surv_df[
+  !is.na(surv_df$OS_time),
+]
+
+############################################################
+# Optimal cutoff
+############################################################
+
+cut <- maxstat.test(
+  Surv(OS_time, OS_event) ~ PINK1,
+  data = surv_df,
+  smethod = "LogRank",
+  pmethod = "HL"
+)
+
+optimal_cutoff <- cut$estimate
+
+print(optimal_cutoff)
+
+write.csv(
+  data.frame(
+    Optimal_PINK1_Cutoff =
+      optimal_cutoff
+  ),
+  "PINK1_Optimal_Cutoff.csv",
+  row.names = FALSE
+)
+
+############################################################
+# High vs Low groups
+############################################################
+
+surv_df$PINK1_Group <- ifelse(
+  surv_df$PINK1 > optimal_cutoff,
+  "High",
+  "Low"
+)
+
+surv_df$PINK1_Group <- factor(
+  surv_df$PINK1_Group,
+  levels = c(
+    "Low",
+    "High"
+  )
+)
+
+table(surv_df$PINK1_Group)
+
+############################################################
+# Save dataset
+############################################################
+
+write.csv(
+  surv_df,
+  "PINK1_Survival_Dataset.csv",
+  row.names = FALSE
+)
+
+############################################################
+# Kaplan-Meier
+############################################################
+
+surv_object <- Surv(
+  surv_df$OS_time,
+  surv_df$OS_event
+)
+
+fit <- survfit(
+  surv_object ~ PINK1_Group,
+  data = surv_df
+)
+
+############################################################
+# Log-rank test
+############################################################
+
+logrank <- survdiff(
+  surv_object ~ PINK1_Group,
+  data = surv_df
+)
+
+capture.output(
+  logrank,
+  file = "PINK1_LogRank_Test.txt"
+)
+
+print(logrank)
+
+############################################################
+# Cox regression
+############################################################
+
+cox_model <- coxph(
+  surv_object ~ PINK1,
+  data = surv_df
+)
+
+cox_summary <- summary(
+  cox_model
+)
+
+capture.output(
+  cox_summary,
+  file = "PINK1_Cox_Regression.txt"
+)
+
+cox_results <- data.frame(
+  Hazard_Ratio =
+    exp(coef(cox_model)),
+  
+  Lower95CI =
+    exp(confint(cox_model))[1],
+  
+  Upper95CI =
+    exp(confint(cox_model))[2],
+  
+  Pvalue =
+    cox_summary$coefficients[
+      ,"Pr(>|z|)"
+    ]
+)
+
+write.csv(
+  cox_results,
+  "PINK1_Cox_Regression.csv",
+  row.names = FALSE
+)
+
+############################################################
+# Kaplan-Meier PNG
+############################################################
+
+png(
+  "PINK1_Kaplan_Meier.png",
+  width = 2400,
+  height = 1800,
+  res = 300
+)
+
+plot(
+  fit,
+  col = c("#4DBBD5", "#E64B35"),
+  lwd = 3,
+  mark.time = TRUE,
+  xlab = "Days",
+  ylab = "Overall Survival Probability",
+  main = "TCGA-PAAD: PINK1 High vs Low"
+)
+
+legend(
+  "bottomleft",
+  legend = levels(surv_df$PINK1_Group),
+  col = c("#4DBBD5", "#E64B35"),
+  lwd = 3,
+  bty = "n"
+)
+
+dev.off()
+
+############################################################
+# Kaplan-Meier PDF
+############################################################
+
+pdf(
+  "PINK1_Kaplan_Meier.pdf",
+  width = 8,
+  height = 6
+)
+
+plot(
+  fit,
+  col = c(
+    "#4DBBD5",
+    "#E64B35"
+  ),
+  lwd = 4,
+  xlab = "Days",
+  ylab = "Overall Survival Probability",
+  main = paste(
+    "TCGA-PAAD\nPINK1 High vs Low\nOptimal cutoff =",
+    round(optimal_cutoff,3)
+  )
+)
+
+legend(
+  "bottomleft",
+  legend = c(
+    paste0(
+      "Low (n=",
+      sum(
+        surv_df$PINK1_Group=="Low"
+      ),
+      ")"
+    ),
+    paste0(
+      "High (n=",
+      sum(
+        surv_df$PINK1_Group=="High"
+      ),
+      ")"
+    )
+  ),
+  col = c(
+    "#4DBBD5",
+    "#E64B35"
+  ),
+  lwd = 4,
+  bty = "n"
+)
+
+dev.off()
+
+############################################################
+# Expression distribution
+############################################################
+
+hist_plot <- ggplot(
+  surv_df,
+  aes(PINK1)
+) +
+  geom_histogram(
+    bins = 30,
+    fill = "#4DBBD5",
+    color = "black"
+  ) +
+  geom_vline(
+    xintercept = optimal_cutoff,
+    color = "red",
+    linewidth = 1.2,
+    linetype = "dashed"
+  ) +
+  theme_classic(base_size = 14) +
+  labs(
+    title = "PINK1 Expression Distribution",
+    subtitle = paste(
+      "Optimal cutoff =",
+      round(optimal_cutoff,3)
+    ),
+    x = "PINK1 Expression",
+    y = "Number of Samples"
+  )
+
+ggsave(
+  "PINK1_Expression_Distribution.png",
+  hist_plot,
+  width = 8,
+  height = 5,
+  dpi = 600
+)
+
+############################################################
+# Summary
+############################################################
+
+summary_df <- data.frame(
+  Total_Samples =
+    nrow(surv_df),
+  
+  High_PINK1 =
+    sum(
+      surv_df$PINK1_Group=="High"
+    ),
+  
+  Low_PINK1 =
+    sum(
+      surv_df$PINK1_Group=="Low"
+    ),
+  
+  Cutoff =
+    optimal_cutoff
+)
+
+write.csv(
+  summary_df,
+  "PINK1_Survival_Summary.csv",
+  row.names = FALSE
+)
+
+############################################################
+# Session info
+############################################################
+
+writeLines(
+  capture.output(
+    sessionInfo()
+  ),
+  "sessionInfo.txt"
+)
+graphics.off()
+cat(
+  "\nPINK1 Survival Analysis Finished\n"
+)
+
+
+############################################################
+# 09_TCGA-PAAD_PINK1_Correlation_Analysis
+############################################################
+
+library(DESeq2)
+library(SummarizedExperiment)
+library(openxlsx)
+library(ggplot2)
+library(pheatmap)
+library(dplyr)
+
+############################################################
+# Directory
+############################################################
+
+dir.create(
+  "C:/Users/Martina/Desktop/New folder/results/TCGA-PAAD_analysis/09_PINK1_Correlation",
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+setwd(
+  "C:/Users/Martina/Desktop/New folder/results/TCGA-PAAD_analysis/09_PINK1_Correlation"
+)
+
+############################################################
+# Load data
+############################################################
+
+data <- readRDS(
+  "../rawdata/TCGA_PAAD_STAR_Counts.rds"
+)
+
+dds <- readRDS(
+  "../rawdata/dds.rds"
+)
+
+############################################################
+# Normalized expression
+############################################################
+
+vsd <- varianceStabilizingTransformation(
+  dds,
+  blind = FALSE
+)
+
+expr <- SummarizedExperiment::assay(vsd)
+
+############################################################
+# Locate PINK1
+############################################################
+
+pink1_row <- which(
+  rowData(data)$gene_name == "PINK1"
+)
+
+if(length(pink1_row) == 0){
+  stop("PINK1 not found.")
+}
+
+############################################################
+# PINK1 expression vector
+############################################################
+
+pink1_expr <- as.numeric(
+  expr[pink1_row, ]
+)
+
+############################################################
+# Correlate with every gene
+############################################################
+
+results <- lapply(
+  1:nrow(expr),
+  function(i){
+    
+    test <- suppressWarnings(
+      cor.test(
+        pink1_expr,
+        as.numeric(expr[i, ]),
+        method = "spearman"
+      )
+    )
+    
+    c(
+      rho = test$estimate,
+      pvalue = test$p.value
+    )
+  }
+)
+
+results <- do.call(
+  rbind,
+  results
+)
+
+gene_info <- data.frame(
+  Ensembl = rownames(data),
+  Gene = rowData(data)$gene_name
+)
+
+gene_info <- gene_info[
+  match(
+    rownames(expr),
+    gene_info$Ensembl
+  ),
+]
+
+corr_df <- data.frame(
+  Ensembl = rownames(expr),
+  Gene = gene_info$Gene,
+  rho = results[,1],
+  pvalue = results[,2]
+)
+length(gene_info$Gene)
+nrow(expr)
+dim(results)
+
+############################################################
+# Multiple testing correction
+############################################################
+
+corr_df$padj <- p.adjust(
+  corr_df$pvalue,
+  method = "BH"
+)
+
+corr_df <- corr_df[
+  order(
+    -abs(corr_df$rho)
+  ),
+]
+
+############################################################
+# Save complete results
+############################################################
+
+write.csv(
+  corr_df,
+  "PINK1_All_Correlations.csv",
+  row.names = FALSE
+)
+
+############################################################
+# Significant genes
+############################################################
+
+sig_corr <- subset(
+  corr_df,
+  padj < 0.05 &
+    abs(rho) > 0.3
+)
+
+write.csv(
+  sig_corr,
+  "PINK1_Significant_Correlations.csv",
+  row.names = FALSE
+)
+
+############################################################
+# Positive correlations
+############################################################
+
+positive <- sig_corr %>%
+  filter(rho > 0) %>%
+  arrange(desc(rho))
+
+write.csv(
+  head(positive, 100),
+  "PINK1_Top_Positive_Correlations.csv",
+  row.names = FALSE
+)
+
+############################################################
+# Negative correlations
+############################################################
+
+negative <- sig_corr %>%
+  filter(rho < 0) %>%
+  arrange(rho)
+
+write.csv(
+  head(negative, 100),
+  "PINK1_Top_Negative_Correlations.csv",
+  row.names = FALSE
+)
+
+############################################################
+# Excel workbook
+############################################################
+
+wb <- createWorkbook()
+
+addWorksheet(wb, "All")
+addWorksheet(wb, "Significant")
+addWorksheet(wb, "Positive")
+addWorksheet(wb, "Negative")
+
+writeData(wb, "All", corr_df)
+writeData(wb, "Significant", sig_corr)
+writeData(wb, "Positive", positive)
+writeData(wb, "Negative", negative)
+
+saveWorkbook(
+  wb,
+  "PINK1_Correlation_Results.xlsx",
+  overwrite = TRUE
+)
+
+############################################################
+# Correlation Volcano Plot
+############################################################
+
+corr_df$Status <- "NS"
+
+corr_df$Status[
+  corr_df$rho > 0.3 &
+    corr_df$padj < 0.05
+] <- "Positive"
+
+corr_df$Status[
+  corr_df$rho < -0.3 &
+    corr_df$padj < 0.05
+] <- "Negative"
+
+volcano <- ggplot(
+  corr_df,
+  aes(
+    rho,
+    -log10(padj),
+    color = Status
+  )
+) +
+  geom_point(
+    alpha = 0.7,
+    size = 2
+  ) +
+  scale_color_manual(
+    values = c(
+      Positive = "#D73027",
+      Negative = "#4575B4",
+      NS = "grey80"
+    )
+  ) +
+  theme_classic(base_size = 14) +
+  labs(
+    title = "Genes Correlated with PINK1",
+    x = "Spearman correlation",
+    y = "-log10(FDR)"
+  )
+
+ggsave(
+  "PINK1_Correlation_Volcano.png",
+  volcano,
+  width = 8,
+  height = 6,
+  dpi = 600
+)
+
+############################################################
+# Top 50/15/10 PINK1-correlated genes heatmap
+############################################################
+
+make_corr_heatmap <- function(
+    n_genes,
+    filename){
+  
+  genes <- unique(
+    c(
+      "PINK1",
+      head(
+        positive$Gene,
+        n_genes - 1
+      )
+    )
+  )
+  
+  rows <- which(
+    rowData(data)$gene_name %in% genes
+  )
+  
+  mat <- expr[rows, ]
+  
+  mat <- t(
+    scale(
+      t(mat)
+    )
+  )
+  
+  rownames(mat) <- make.unique(
+    rowData(data)$gene_name[rows]
+  )
+  
+  annotation <- data.frame(
+    Group = colData(vsd)$group
+  )
+  
+  rownames(annotation) <- colnames(vsd)
+  
+  ann_colors <- list(
+    Group = c(
+      Tumor = "#E64B35",
+      Normal = "#4DBBD5"
+    )
+  )
+  
+  pheatmap(
+    mat,
+    
+    annotation_col = annotation,
+    annotation_colors = ann_colors,
+    
+    cluster_rows = TRUE,
+    cluster_cols = TRUE,
+    
+    show_colnames = FALSE,
+    
+    border_color = NA,
+    
+    fontsize_row = 10,
+    
+    color = colorRampPalette(
+      c(
+        "#2166AC",
+        "white",
+        "#B2182B"
+      )
+    )(100),
+    
+    main = paste(
+      "Top",
+      n_genes,
+      "PINK1-Correlated Genes"
+    ),
+    
+    filename = filename,
+    
+    width = 10,
+    height = 10
+  )
+}
+make_corr_heatmap(
+  10,
+  "PINK1_Top10_Correlation_Heatmap.png"
+)
+
+make_corr_heatmap(
+  15,
+  "PINK1_Top15_Correlation_Heatmap.png"
+)
+
+make_corr_heatmap(
+  50,
+  "PINK1_Top50_Correlation_Heatmap.png"
+)
+
+############################################################
+# PINK1 top correlations
+############################################################
+
+top20 <- head(
+  positive,
+  20
+)
+
+write.csv(
+  top20,
+  "PINK1_Top20_Genes.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  head(positive, 10),
+  "PINK1_Top10_Correlated_Genes.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  head(positive, 15),
+  "PINK1_Top15_Correlated_Genes.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  head(positive, 50),
+  "PINK1_Top50_Correlated_Genes.csv",
+  row.names = FALSE
+)
+
+
+############################################################
+# PINK1 self-check
+############################################################
+
+pink1_result <- corr_df[
+  corr_df$Gene == "PINK1",
+]
+
+write.csv(
+  pink1_result,
+  "PINK1_SelfCorrelation.csv",
+  row.names = FALSE
+)
+
+############################################################
+# Summary
+############################################################
+
+summary_df <- data.frame(
+  Total_Genes = nrow(corr_df),
+  Significant_Genes = nrow(sig_corr),
+  Positive_Genes = nrow(positive),
+  Negative_Genes = nrow(negative)
+)
+
+write.csv(
+  summary_df,
+  "PINK1_Correlation_Summary.csv",
+  row.names = FALSE
+)
+
+############################################################
+# Session info
+############################################################
+
+writeLines(
+  capture.output(
+    sessionInfo()
+  ),
+  "sessionInfo.txt"
+)
+
+cat(
+  "\nPINK1 correlation analysis completed.\n"
+)
+
+############################################################
+# 10_TCGA-PAAD_Pathway_Enrichment.R
+# GO + KEGG Enrichment
+# DEGs and PINK1-associated Genes
+############################################################
+
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(enrichplot)
+library(openxlsx)
+library(ggplot2)
+library(dplyr)
+
+############################################################
+# Directory
+############################################################
+
+dir.create(
+  "C:/Users/Martina/Desktop/New folder/results/TCGA-PAAD_analysis/10_Pathway_Enrichment",
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+setwd(
+  "C:/Users/Martina/Desktop/New folder/results/TCGA-PAAD_analysis/10_Pathway_Enrichment"
+)
+
+############################################################
+# Load Data
+############################################################
+
+sig_genes <- readRDS(
+  "../rawdata/sig_genes.rds"
+)
+
+positive <- read.csv(
+  "../09_PINK1_Correlation/PINK1_Top_Positive_Correlations.csv",
+  stringsAsFactors = FALSE
+)
+
+negative <- read.csv(
+  "../09_PINK1_Correlation/PINK1_Top_Negative_Correlations.csv",
+  stringsAsFactors = FALSE
+)
+
+############################################################
+# Gene Lists
+############################################################
+
+deg_symbols <- unique(
+  na.omit(sig_genes$gene_name)
+)
+
+pink1_pos <- unique(
+  na.omit(positive$Gene)
+)
+
+pink1_neg <- unique(
+  na.omit(negative$Gene)
+)
+
+############################################################
+# Entrez Conversion
+############################################################
+
+deg_entrez <- bitr(
+  deg_symbols,
+  fromType = "SYMBOL",
+  toType = "ENTREZID",
+  OrgDb = org.Hs.eg.db
+)
+
+pink1_pos_entrez <- bitr(
+  pink1_pos,
+  fromType = "SYMBOL",
+  toType = "ENTREZID",
+  OrgDb = org.Hs.eg.db
+)
+
+pink1_neg_entrez <- bitr(
+  pink1_neg,
+  fromType = "SYMBOL",
+  toType = "ENTREZID",
+  OrgDb = org.Hs.eg.db
+)
+
+############################################################
+# GO Biological Process
+############################################################
+
+go_deg <- enrichGO(
+  gene = deg_entrez$ENTREZID,
+  OrgDb = org.Hs.eg.db,
+  keyType = "ENTREZID",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.05,
+  qvalueCutoff = 0.05,
+  readable = TRUE
+)
+
+go_pos <- enrichGO(
+  gene = pink1_pos_entrez$ENTREZID,
+  OrgDb = org.Hs.eg.db,
+  keyType = "ENTREZID",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.05,
+  readable = TRUE
+)
+
+go_neg <- enrichGO(
+  gene = pink1_neg_entrez$ENTREZID,
+  OrgDb = org.Hs.eg.db,
+  keyType = "ENTREZID",
+  ont = "BP",
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.05,
+  readable = TRUE
+)
+
+############################################################
+# KEGG
+############################################################
+
+kegg_deg <- enrichKEGG(
+  gene = deg_entrez$ENTREZID,
+  organism = "hsa",
+  pvalueCutoff = 0.05
+)
+
+kegg_pos <- enrichKEGG(
+  gene = pink1_pos_entrez$ENTREZID,
+  organism = "hsa",
+  pvalueCutoff = 0.05
+)
+
+kegg_neg <- enrichKEGG(
+  gene = pink1_neg_entrez$ENTREZID,
+  organism = "hsa",
+  pvalueCutoff = 0.05
+)
+
+############################################################
+# Save CSV Results
+############################################################
+
+write.csv(
+  as.data.frame(go_deg),
+  "GO_BP_DEGs.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  as.data.frame(go_pos),
+  "GO_BP_PINK1_Positive.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  as.data.frame(go_neg),
+  "GO_BP_PINK1_Negative.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  as.data.frame(kegg_deg),
+  "KEGG_DEGs.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  as.data.frame(kegg_pos),
+  "KEGG_PINK1_Positive.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  as.data.frame(kegg_neg),
+  "KEGG_PINK1_Negative.csv",
+  row.names = FALSE
+)
+
+############################################################
+# Excel Workbook
+############################################################
+
+wb <- createWorkbook()
+
+addWorksheet(wb,"GO_DEGs")
+addWorksheet(wb,"GO_PINK1_Pos")
+addWorksheet(wb,"GO_PINK1_Neg")
+addWorksheet(wb,"KEGG_DEGs")
+addWorksheet(wb,"KEGG_PINK1_Pos")
+addWorksheet(wb,"KEGG_PINK1_Neg")
+
+writeData(wb,"GO_DEGs",as.data.frame(go_deg))
+writeData(wb,"GO_PINK1_Pos",as.data.frame(go_pos))
+writeData(wb,"GO_PINK1_Neg",as.data.frame(go_neg))
+writeData(wb,"KEGG_DEGs",as.data.frame(kegg_deg))
+writeData(wb,"KEGG_PINK1_Pos",as.data.frame(kegg_pos))
+writeData(wb,"KEGG_PINK1_Neg",as.data.frame(kegg_neg))
+
+saveWorkbook(
+  wb,
+  "TCGA_PAAD_Pathway_Enrichment.xlsx",
+  overwrite = TRUE
+)
+
+############################################################
+# GO DEGs Dotplot
+############################################################
+
+if(nrow(as.data.frame(go_deg)) > 0){
+  
+  p <- dotplot(
+    go_deg,
+    showCategory = min(
+      20,
+      nrow(as.data.frame(go_deg))
+    )
+  ) +
+    ggtitle(
+      "GO Biological Processes\nPrimary Tumor vs Normal"
+    ) +
+    theme_bw(base_size = 14)
+  
+  ggsave(
+    "GO_DEGs_Dotplot.png",
+    p,
+    width = 10,
+    height = 10,
+    dpi = 600
+  )
+  
+}
+
+############################################################
+# GO Positive Dotplot
+############################################################
+
+go_pos_df <- as.data.frame(go_pos)
+
+if(nrow(go_pos_df) > 0){
+  
+  p <- dotplot(
+    go_pos,
+    showCategory = min(
+      10,
+      nrow(go_pos_df)
+    )
+  ) +
+    ggtitle(
+      "PINK1-associated Biological Processes"
+    ) +
+    theme_bw(base_size = 14)
+  
+  ggsave(
+    "GO_PINK1_Positive_Dotplot.png",
+    p,
+    width = 8,
+    height = 6,
+    dpi = 600
+  )
+  
+}
+
+############################################################
+# GO Publication Barplot
+############################################################
+
+if(nrow(go_pos_df) > 0){
+  
+  go_pos_df <- go_pos_df[
+    order(go_pos_df$p.adjust),
+  ]
+  
+  go_pos_df$Description <- factor(
+    go_pos_df$Description,
+    levels = rev(go_pos_df$Description)
+  )
+  
+  p <- ggplot(
+    go_pos_df,
+    aes(
+      x = Description,
+      y = -log10(p.adjust)
+    )
+  ) +
+    geom_col(
+      fill = "#D55E5E",
+      width = 0.7
+    ) +
+    coord_flip() +
+    theme_classic(base_size = 14) +
+    labs(
+      title = "PINK1-associated Biological Processes",
+      x = "",
+      y = expression(-logFDR)
+    ) +
+    theme(
+      plot.title = element_text(
+        face = "bold",
+        hjust = 0.5
+      )
+    )
+  
+  ggsave(
+    "PINK1_GO_PublicationBarplot.png",
+    p,
+    width = 8,
+    height = 4,
+    dpi = 600
+  )
+  
+  ggsave(
+    "PINK1_GO_PublicationBarplot.pdf",
+    p,
+    width = 8,
+    height = 4
+  )
+  
+}
+
+############################################################
+# KEGG Positive
+############################################################
+
+if(nrow(as.data.frame(kegg_pos)) > 0){
+  
+  p <- dotplot(
+    kegg_pos,
+    showCategory = min(
+      20,
+      nrow(as.data.frame(kegg_pos))
+    )
+  ) +
+    ggtitle(
+      "KEGG Pathways\nPINK1 Positive Correlations"
+    ) +
+    theme_bw(base_size = 14)
+  
+  ggsave(
+    "KEGG_PINK1_Positive_Dotplot.png",
+    p,
+    width = 8,
+    height = 6,
+    dpi = 600
+  )
+  
+} else {
+  
+  writeLines(
+    "No significant KEGG pathways detected.",
+    "KEGG_PINK1_Positive_EMPTY.txt"
+  )
+  
+}
+
+############################################################
+# Summary Tables
+############################################################
+
+write.csv(
+  head(as.data.frame(go_pos),20),
+  "Top20_GO_PINK1_Positive.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  head(as.data.frame(kegg_pos),20),
+  "Top20_KEGG_PINK1_Positive.csv",
+  row.names = FALSE
+)
+
+summary_df <- data.frame(
+  GO_DEG_Terms = nrow(as.data.frame(go_deg)),
+  GO_PINK1_Positive = nrow(as.data.frame(go_pos)),
+  GO_PINK1_Negative = nrow(as.data.frame(go_neg)),
+  KEGG_DEG_Pathways = nrow(as.data.frame(kegg_deg)),
+  KEGG_PINK1_Positive = nrow(as.data.frame(kegg_pos)),
+  KEGG_PINK1_Negative = nrow(as.data.frame(kegg_neg))
+)
+
+write.csv(
+  summary_df,
+  "Enrichment_Summary.csv",
+  row.names = FALSE
+)
+
+############################################################
+# Session Info
+############################################################
+
+writeLines(
+  capture.output(sessionInfo()),
+  "sessionInfo.txt"
+)
+
+cat(
+  "\nPathway enrichment completed successfully.\n"
+)
