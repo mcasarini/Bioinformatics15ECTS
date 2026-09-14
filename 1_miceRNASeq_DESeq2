@@ -1,0 +1,62 @@
+# ============================================================
+# RUN DESeq2
+# ============================================================
+
+cat("\n\n")
+cat("============================================================\n")
+cat("RUNNING DESeq()\n")
+cat("============================================================\n")
+
+dds_NT_deseq <- DESeq(dds_NT)
+dds_IST_deseq <- DESeq(dds_IST)
+dds_MTK25_deseq <- DESeq(dds_MTK25)
+dds_MTK26_deseq <- DESeq(dds_MTK26)
+dds_POE_deseq <- DESeq(dds_POE)
+
+# ============================================================
+# STORE PROCESSED OBJECTS
+# ============================================================
+
+dds_deseq_list <- list(
+  NT = dds_NT_deseq,
+  IST = dds_IST_deseq,
+  MTK25 = dds_MTK25_deseq,
+  MTK26 = dds_MTK26_deseq,
+  POE = dds_POE_deseq
+)
+
+# ============================================================
+# CHECK RESULTS
+# ============================================================
+
+cat("\n\n")
+cat("============================================================\n")
+cat("DESeq() COMPLETED\n")
+cat("============================================================\n")
+
+for (st in names(dds_deseq_list)) {
+  
+  dds <- dds_deseq_list[[st]]
+  
+  cat("\n------------------------------------------------------------\n")
+  cat(st, "\n")
+  cat("------------------------------------------------------------\n")
+  
+  cat("Genes:", nrow(dds), "\n")
+  cat("Samples:", ncol(dds), "\n")
+  cat("Design:", deparse(design(dds)), "\n")
+  
+  cat(
+    "Size factors:",
+    paste(round(sizeFactors(dds), 3), collapse = ", "),
+    "\n"
+  )
+  
+  cat("Status: DESeq() completed\n")
+}
+
+cat("\n")
+cat("============================================================\n")
+cat("READY FOR CONTRASTS / RESULTS()\n")
+cat("============================================================\n")
+
