@@ -1,0 +1,1198 @@
+# ============================================================
+# DESeq2 ANALYSIS
+# RUN DESeq() + ALL BIOLOGICALLY RELEVANT CONTRASTS
+# ============================================================
+
+library(DESeq2)
+
+cat("\n\n")
+cat("============================================================\n")
+cat("DESeq2 ANALYSIS\n")
+cat("============================================================\n")
+
+
+# ============================================================
+# 0. CHECK REQUIRED OBJECTS
+# ============================================================
+
+required_dds <- c(
+  "dds_NT",
+  "dds_IST",
+  "dds_MTK25",
+  "dds_MTK26",
+  "dds_POE"
+)
+
+missing_dds <- required_dds[
+  !required_dds %in% ls()
+]
+
+if (length(missing_dds) > 0) {
+  
+  stop(
+    paste0(
+      "\nMISSING DESeq2 OBJECTS:\n",
+      paste(missing_dds, collapse = "\n"),
+      "\n\nCreate these objects before running this script."
+    )
+  )
+}
+
+
+# ============================================================
+# 1. RUN DESeq()
+# ============================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("RUNNING DESeq()\n")
+cat("============================================================\n")
+
+dds_NT_deseq <- DESeq(dds_NT)
+
+dds_IST_deseq <- DESeq(dds_IST)
+
+dds_MTK25_deseq <- DESeq(dds_MTK25)
+
+dds_MTK26_deseq <- DESeq(dds_MTK26)
+
+dds_POE_deseq <- DESeq(dds_POE)
+
+
+# ============================================================
+# 2. STORE DESeq OBJECTS
+# ============================================================
+
+dds_deseq_list <- list(
+  NT = dds_NT_deseq,
+  IST = dds_IST_deseq,
+  MTK25 = dds_MTK25_deseq,
+  MTK26 = dds_MTK26_deseq,
+  POE = dds_POE_deseq
+)
+
+
+# ============================================================
+# 3. CHECK DESIGNS AND COEFFICIENTS
+# ============================================================
+
+cat("\n\n")
+cat("============================================================\n")
+cat("DESeq2 DESIGNS AND COEFFICIENTS\n")
+cat("============================================================\n")
+
+for (st in names(dds_deseq_list)) {
+  
+  dds <- dds_deseq_list[[st]]
+  
+  cat("\n------------------------------------------------------------\n")
+  cat(st, "\n")
+  cat("------------------------------------------------------------\n")
+  
+  cat(
+    "Design: ",
+    deparse(design(dds)),
+    "\n",
+    sep = ""
+  )
+  
+  cat("\nCoefficients:\n")
+  
+  print(resultsNames(dds))
+}
+
+
+# ============================================================
+# 4. HELPER FUNCTION
+#
+# Reverse an already calculated contrast.
+#
+# Example:
+#
+# KO vs WT
+#
+# becomes
+#
+# WT vs KO
+#
+# log2FC and statistic change sign.
+# p-value and padj remain identical.
+# ============================================================
+
+reverse_result <- function(res) {
+  
+  res_reversed <- res
+  
+  if ("log2FoldChange" %in% names(res_reversed)) {
+    
+    res_reversed$log2FoldChange <-
+      -res_reversed$log2FoldChange
+  }
+  
+  if ("stat" %in% names(res_reversed)) {
+    
+    res_reversed$stat <-
+      -res_reversed$stat
+  }
+  
+  attr(
+    res_reversed,
+    "reversed_contrast"
+  ) <- TRUE
+  
+  res_reversed
+}
+
+
+# ============================================================
+# 5. NT
+#
+# Design:
+# ~ genotype
+#
+# Biological contrast:
+# KO vs WT
+# ============================================================
+
+cat("\n\n")
+cat("============================================================\n")
+cat("NT CONTRASTS\n")
+cat("============================================================\n")
+
+res_NT_KO_vs_WT <- results(
+  dds_NT_deseq,
+  contrast = c(
+    "genotype",
+    "KO",
+    "WT"
+  )
+)
+
+cat("\nNT_KO_vs_WT\n")
+print(summary(res_NT_KO_vs_WT))
+
+
+# ============================================================
+# 6. IST
+#
+# Design:
+# ~ treatment
+#
+# Biological contrast:
+# ISA vs Ctrl
+# ============================================================
+
+cat("\n\n")
+cat("============================================================\n")
+cat("IST CONTRASTS\n")
+cat("============================================================\n")
+
+res_IST_ISA_vs_Ctrl <- results(
+  dds_IST_deseq,
+  contrast = c(
+    "treatment",
+    "ISA",
+    "Ctrl"
+  )
+)
+
+cat("\nIST_ISA_vs_Ctrl\n")
+print(summary(res_IST_ISA_vs_Ctrl))
+
+
+# ============================================================
+# 7. MTK25
+#
+# Design:
+# ~ genotype * treatment
+#
+# Expected:
+#
+# genotype:
+#   WT
+#   KO
+#
+# treatment:
+#   Ctrl
+#   MTK
+#
+# Reference levels:
+#   WT
+#   Ctrl
+#
+# Therefore:
+#
+# genotype_KO_vs_WT
+# treatment_MTK_vs_Ctrl
+# genotypeKO.treatmentMTK
+# ============================================================
+
+cat("\n\n")
+cat("============================================================\n")
+cat("MTK25 CONTRASTS\n")
+cat("============================================================\n")
+
+cat("\nChecking MTK25 coefficients...\n")
+
+print(
+  resultsNames(dds_MTK25_deseq)
+)
+
+
+# ------------------------------------------------------------
+# 7A. KO vs WT
+#
+# At the reference treatment = Ctrl
+#
+# This is:
+#
+# CtrlKO vs CtrlWT
+# ------------------------------------------------------------
+
+res_MTK25_CtrlKO_vs_ctrlWT <- results(
+  dds_MTK25_deseq,
+  name = "genotype_KO_vs_WT"
+)
+
+cat("\nMTK25_CtrlKO_vs_ctrlWT\n")
+print(summary(res_MTK25_CtrlKO_vs_ctrlWT))
+
+
+# ------------------------------------------------------------
+# 7B. MAIN TREATMENT EFFECT
+#
+# MTK vs Ctrl
+#
+# At reference genotype = WT
+#
+# Therefore this corresponds to:
+#
+# WT_MTK vs WT_Ctrl
+# ------------------------------------------------------------
+
+res_MTK25_WT_MTK_vs_Ctrl <- results(
+  dds_MTK25_deseq,
+  name = "treatment_MTK_vs_Ctrl"
+)
+
+cat("\nMTK25_WT_MTK_vs_Ctrl\n")
+print(summary(res_MTK25_WT_MTK_vs_Ctrl))
+
+
+# ------------------------------------------------------------
+# 7C. INTERACTION
+# ------------------------------------------------------------
+
+res_MTK25_interaction <- results(
+  dds_MTK25_deseq,
+  name = "genotypeKO.treatmentMTK"
+)
+
+cat("\nMTK25_interaction\n")
+print(summary(res_MTK25_interaction))
+
+
+# ------------------------------------------------------------
+# 7D. KO MTK vs KO Ctrl
+#
+# KO treatment effect =
+#
+# treatment_MTK_vs_Ctrl
+#
+# +
+#
+# genotypeKO.treatmentMTK
+# ------------------------------------------------------------
+
+res_MTK25_KO_MTK_vs_Ctrl <- results(
+  dds_MTK25_deseq,
+  contrast = list(
+    c(
+      "treatment_MTK_vs_Ctrl",
+      "genotypeKO.treatmentMTK"
+    )
+  )
+)
+
+cat("\nMTK25_KO_MTK_vs_Ctrl\n")
+print(summary(res_MTK25_KO_MTK_vs_Ctrl))
+
+
+# ------------------------------------------------------------
+# 7E. KO MTK vs WT MTK
+#
+# KO MTK - WT MTK
+#
+# =
+#
+# genotype_KO_vs_WT
+#
+# +
+#
+# genotypeKO.treatmentMTK
+#
+# We first calculate KO MTK vs WT MTK.
+# Then reverse it to obtain:
+#
+# WT MTK vs KO MTK
+# ------------------------------------------------------------
+
+res_MTK25_koMTK_vs_wtMTK <- results(
+  dds_MTK25_deseq,
+  contrast = list(
+    c(
+      "genotype_KO_vs_WT",
+      "genotypeKO.treatmentMTK"
+    )
+  )
+)
+
+res_MTK25_wtMTK_vs_koMTK <- reverse_result(
+  res_MTK25_koMTK_vs_wtMTK
+)
+
+cat("\nMTK25_wtMTK_vs_koMTK\n")
+print(summary(res_MTK25_wtMTK_vs_koMTK))
+
+
+# ============================================================
+# 8. MTK26
+#
+# Design:
+# ~ treatment
+#
+# MTK vs Ctrl
+# ============================================================
+
+cat("\n\n")
+cat("============================================================\n")
+cat("MTK26 CONTRASTS\n")
+cat("============================================================\n")
+
+res_MTK26_MTK_vs_Ctrl <- results(
+  dds_MTK26_deseq,
+  contrast = c(
+    "treatment",
+    "MTK",
+    "Ctrl"
+  )
+)
+
+cat("\nMTK26_MTK_vs_Ctrl\n")
+print(summary(res_MTK26_MTK_vs_Ctrl))
+
+
+# ============================================================
+# 9. POE
+#
+# Design:
+# ~ genotype * PINK1
+#
+# Expected:
+#
+# genotype:
+#   WT
+#   KO
+#
+# PINK1:
+#   Ctrl
+#   OE
+#
+# Reference:
+#   WT
+#   Ctrl
+# ============================================================
+
+cat("\n\n")
+cat("============================================================\n")
+cat("POE CONTRASTS\n")
+cat("============================================================\n")
+
+cat("\nChecking POE coefficients...\n")
+
+print(
+  resultsNames(dds_POE_deseq)
+)
+
+
+# ------------------------------------------------------------
+# 9A. KO vs WT at Ctrl
+#
+# CtrlKO vs CtrlWT
+# ------------------------------------------------------------
+
+res_POE_CtrlKO_vs_ctrlWT <- results(
+  dds_POE_deseq,
+  name = "genotype_KO_vs_WT"
+)
+
+cat("\nPOE_ctrlKO_vs_ctrlWT\n")
+print(summary(res_POE_CtrlKO_vs_ctrlWT))
+
+
+# ------------------------------------------------------------
+# 9B. WT OE vs WT Ctrl
+#
+# Main PINK1 coefficient
+# ------------------------------------------------------------
+
+res_POE_WT_OE_vs_Ctrl <- results(
+  dds_POE_deseq,
+  name = "PINK1_OE_vs_Ctrl"
+)
+
+cat("\nPOE_WT_OE_vs_Ctrl\n")
+print(summary(res_POE_WT_OE_vs_Ctrl))
+
+
+# ------------------------------------------------------------
+# 9C. INTERACTION
+# ------------------------------------------------------------
+
+res_POE_interaction <- results(
+  dds_POE_deseq,
+  name = "genotypeKO.PINK1OE"
+)
+
+cat("\nPOE_interaction\n")
+print(summary(res_POE_interaction))
+
+
+# ------------------------------------------------------------
+# 9D. KO OE vs KO Ctrl
+#
+# =
+#
+# PINK1_OE_vs_Ctrl
+#
+# +
+#
+# genotypeKO.PINK1OE
+# ------------------------------------------------------------
+
+res_POE_KO_OE_vs_Ctrl <- results(
+  dds_POE_deseq,
+  contrast = list(
+    c(
+      "PINK1_OE_vs_Ctrl",
+      "genotypeKO.PINK1OE"
+    )
+  )
+)
+
+cat("\nPOE_KO_OE_vs_Ctrl\n")
+print(summary(res_POE_KO_OE_vs_Ctrl))
+
+
+# ------------------------------------------------------------
+# 9E. WT OE vs KO OE
+#
+# First calculate:
+#
+# KO OE vs WT OE
+#
+# =
+#
+# genotype_KO_vs_WT
+#
+# +
+#
+# genotypeKO.PINK1OE
+#
+# Then reverse.
+# ------------------------------------------------------------
+
+res_POE_koOE_vs_wtOE <- results(
+  dds_POE_deseq,
+  contrast = list(
+    c(
+      "genotype_KO_vs_WT",
+      "genotypeKO.PINK1OE"
+    )
+  )
+)
+
+res_POE_wtOE_vs_koOE <- reverse_result(
+  res_POE_koOE_vs_wtOE
+)
+
+cat("\nPOE_wtOE_vs_koOE\n")
+print(summary(res_POE_wtOE_vs_koOE))
+
+
+# ============================================================
+# 10. BUILD FINAL results_list
+#
+# EXACT NAMES REQUESTED
+# ============================================================
+
+cat("\n\n")
+cat("============================================================\n")
+cat("BUILDING FINAL results_list\n")
+cat("============================================================\n")
+
+results_list <- list(
+  
+  # ----------------------------------------------------------
+  # NT
+  # ----------------------------------------------------------
+  
+  NT_KO_vs_WT =
+    res_NT_KO_vs_WT,
+  
+  
+  # ----------------------------------------------------------
+  # IST
+  # ----------------------------------------------------------
+  
+  IST_ISA_vs_Ctrl =
+    res_IST_ISA_vs_Ctrl,
+  
+  
+  # ----------------------------------------------------------
+  # MTK25
+  # ----------------------------------------------------------
+  
+  MTK25_CtrlKO_vs_ctrlWT =
+    res_MTK25_CtrlKO_vs_ctrlWT,
+  
+  MTK25_wtMTK_vs_koMTK =
+    res_MTK25_wtMTK_vs_koMTK,
+  
+  MTK25_interaction =
+    res_MTK25_interaction,
+  
+  MTK25_WT_MTK_vs_Ctrl =
+    res_MTK25_WT_MTK_vs_Ctrl,
+  
+  MTK25_KO_MTK_vs_Ctrl =
+    res_MTK25_KO_MTK_vs_Ctrl,
+  
+  
+  # ----------------------------------------------------------
+  # MTK26
+  # ----------------------------------------------------------
+  
+  MTK26_MTK_vs_Ctrl =
+    res_MTK26_MTK_vs_Ctrl,
+  
+  
+  # ----------------------------------------------------------
+  # POE
+  # ----------------------------------------------------------
+  
+  POE_ctrlKO_vs_ctrlWT =
+    res_POE_CtrlKO_vs_ctrlWT,
+  
+  POE_wtOE_vs_koOE =
+    res_POE_wtOE_vs_koOE,
+  
+  POE_interaction =
+    res_POE_interaction,
+  
+  POE_WT_OE_vs_Ctrl =
+    res_POE_WT_OE_vs_Ctrl,
+  
+  POE_KO_OE_vs_Ctrl =
+    res_POE_KO_OE_vs_Ctrl
+)
+
+
+# ============================================================
+# 11. CHECK FINAL results_list
+# ============================================================
+
+expected_contrasts <- c(
+  
+  "NT_KO_vs_WT",
+  
+  "IST_ISA_vs_Ctrl",
+  
+  "MTK25_CtrlKO_vs_ctrlWT",
+  "MTK25_wtMTK_vs_koMTK",
+  "MTK25_interaction",
+  "MTK25_WT_MTK_vs_Ctrl",
+  "MTK25_KO_MTK_vs_Ctrl",
+  
+  "MTK26_MTK_vs_Ctrl",
+  
+  "POE_ctrlKO_vs_ctrlWT",
+  "POE_wtOE_vs_koOE",
+  "POE_interaction",
+  "POE_WT_OE_vs_Ctrl",
+  "POE_KO_OE_vs_Ctrl"
+)
+
+
+missing_results <- expected_contrasts[
+  !expected_contrasts %in% names(results_list)
+]
+
+if (length(missing_results) > 0) {
+  
+  stop(
+    paste0(
+      "\n============================================================\n",
+      "ERROR: MISSING CONTRASTS IN results_list\n",
+      "============================================================\n\n",
+      paste(missing_results, collapse = "\n"),
+      "\n"
+    )
+  )
+}
+
+
+# ============================================================
+# 12. CHECK THAT NO UNEXPECTED RESULTS ARE PRESENT
+# ============================================================
+
+unexpected_results <- names(results_list)[
+  !names(results_list) %in% expected_contrasts
+]
+
+if (length(unexpected_results) > 0) {
+  
+  cat("\nWARNING: unexpected result names:\n")
+  print(unexpected_results)
+}
+
+
+# ============================================================
+# 13. PRINT FINAL CONTRAST LIST
+# ============================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("FINAL AVAILABLE CONTRASTS\n")
+cat("============================================================\n\n")
+
+print(names(results_list))
+
+cat(
+  "\nTotal contrasts:",
+  length(results_list),
+  "\n"
+)
+
+
+# ============================================================
+# 14. RESULTS QC
+# ============================================================
+
+padj_cutoff <- 0.05
+lfc_cutoff <- 1
+
+
+qc_results <- do.call(
+  rbind,
+  lapply(
+    names(results_list),
+    function(comparison) {
+      
+      res <- as.data.frame(
+        results_list[[comparison]]
+      )
+      
+      sig <- (
+        !is.na(res$padj) &
+          res$padj < padj_cutoff
+      )
+      
+      sig_lfc <- (
+        sig &
+          !is.na(res$log2FoldChange) &
+          abs(res$log2FoldChange) >= lfc_cutoff
+      )
+      
+      up <- (
+        sig_lfc &
+          res$log2FoldChange > 0
+      )
+      
+      down <- (
+        sig_lfc &
+          res$log2FoldChange < 0
+      )
+      
+      data.frame(
+        
+        comparison = comparison,
+        
+        total_genes = nrow(res),
+        
+        tested_genes =
+          sum(!is.na(res$pvalue)),
+        
+        nonNA_padj =
+          sum(!is.na(res$padj)),
+        
+        NA_padj =
+          sum(is.na(res$padj)),
+        
+        DE_padj_0.05 =
+          sum(sig),
+        
+        DE_padj_0.05_LFC1 =
+          sum(sig_lfc),
+        
+        up_LFC1 =
+          sum(up),
+        
+        down_LFC1 =
+          sum(down),
+        
+        min_log2FC =
+          ifelse(
+            all(is.na(res$log2FoldChange)),
+            NA,
+            min(
+              res$log2FoldChange,
+              na.rm = TRUE
+            )
+          ),
+        
+        max_log2FC =
+          ifelse(
+            all(is.na(res$log2FoldChange)),
+            NA,
+            max(
+              res$log2FoldChange,
+              na.rm = TRUE
+            )
+          ),
+        
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+rownames(qc_results) <- NULL
+
+
+# ============================================================
+# 15. CHECK QC CONSISTENCY
+# ============================================================
+
+stopifnot(
+  all(
+    qc_results$up_LFC1 +
+      qc_results$down_LFC1 ==
+      qc_results$DE_padj_0.05_LFC1
+  )
+)
+
+
+# ============================================================
+# 16. PRINT QC
+# ============================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("RESULTS QC\n")
+cat("============================================================\n\n")
+
+print(
+  qc_results,
+  row.names = FALSE
+)
+
+
+# ============================================================
+# 17. TOP 10 GENES PER CONTRAST
+# ============================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("TOP 10 GENES PER CONTRAST\n")
+cat("============================================================\n")
+
+
+for (comparison in names(results_list)) {
+  
+  df <- as.data.frame(
+    results_list[[comparison]]
+  )
+  
+  df$gene_id <- rownames(df)
+  
+  df <- df[
+    !is.na(df$padj),
+    ,
+    drop = FALSE
+  ]
+  
+  if (nrow(df) == 0) {
+    
+    cat(
+      "\n",
+      comparison,
+      ": no genes with padj\n",
+      sep = ""
+    )
+    
+    next
+  }
+  
+  df <- df[
+    order(df$padj),
+    ,
+    drop = FALSE
+  ]
+  
+  cat("\n")
+  cat("------------------------------------------------------------\n")
+  cat(comparison, "\n")
+  cat("------------------------------------------------------------\n")
+  
+  cols_to_print <- intersect(
+    c(
+      "gene_id",
+      "baseMean",
+      "log2FoldChange",
+      "lfcSE",
+      "stat",
+      "pvalue",
+      "padj"
+    ),
+    colnames(df)
+  )
+  
+  print(
+    head(
+      df[, cols_to_print, drop = FALSE],
+      10
+    ),
+    row.names = FALSE
+  )
+}
+
+
+# ============================================================
+# 18. SAVE RESULTS OBJECT
+# ============================================================
+
+save(
+  results_list,
+  dds_deseq_list,
+  qc_results,
+  file = "DESeq2_all_results.RData"
+)
+
+
+# ============================================================
+# 19. SAVE QC CSV
+# ============================================================
+
+write.csv(
+  qc_results,
+  "DESeq2_results_QC_summary.csv",
+  row.names = FALSE
+)
+
+
+# ============================================================
+# 20. DEFINITIVE DE LISTS
+# ============================================================
+
+dir.create(
+  "DE_final",
+  showWarnings = FALSE
+)
+
+dir.create(
+  "DE_final/padj_0.05",
+  showWarnings = FALSE
+)
+
+dir.create(
+  "DE_final/padj_0.05_LFC1",
+  showWarnings = FALSE
+)
+
+
+DE_padj05 <- list()
+
+DE_padj05_LFC1 <- list()
+
+
+for (comparison in names(results_list)) {
+  
+  df <- as.data.frame(
+    results_list[[comparison]]
+  )
+  
+  df$gene_id <- rownames(df)
+  
+  
+  # ----------------------------------------------------------
+  # padj < 0.05
+  # ----------------------------------------------------------
+  
+  de <- df[
+    !is.na(df$padj) &
+      df$padj < padj_cutoff,
+    ,
+    drop = FALSE
+  ]
+  
+  
+  # ----------------------------------------------------------
+  # padj < 0.05 AND |LFC| >= 1
+  # ----------------------------------------------------------
+  
+  de_lfc <- df[
+    !is.na(df$padj) &
+      !is.na(df$log2FoldChange) &
+      df$padj < padj_cutoff &
+      abs(df$log2FoldChange) >= lfc_cutoff,
+    ,
+    drop = FALSE
+  ]
+  
+  
+  # ----------------------------------------------------------
+  # Direction
+  # ----------------------------------------------------------
+  
+  if (nrow(de) > 0) {
+    
+    de$direction <- ifelse(
+      de$log2FoldChange > 0,
+      "up",
+      ifelse(
+        de$log2FoldChange < 0,
+        "down",
+        "zero"
+      )
+    )
+  }
+  
+  
+  if (nrow(de_lfc) > 0) {
+    
+    de_lfc$direction <- ifelse(
+      de_lfc$log2FoldChange > 0,
+      "up",
+      ifelse(
+        de_lfc$log2FoldChange < 0,
+        "down",
+        "zero"
+      )
+    )
+  }
+  
+  
+  # ----------------------------------------------------------
+  # Sort
+  # ----------------------------------------------------------
+  
+  if (nrow(de) > 0) {
+    
+    de <- de[
+      order(
+        de$padj,
+        -abs(de$log2FoldChange)
+      ),
+      ,
+      drop = FALSE
+    ]
+  }
+  
+  
+  if (nrow(de_lfc) > 0) {
+    
+    de_lfc <- de_lfc[
+      order(
+        de_lfc$padj,
+        -abs(de_lfc$log2FoldChange)
+      ),
+      ,
+      drop = FALSE
+    ]
+  }
+  
+  
+  # ----------------------------------------------------------
+  # Store
+  # ----------------------------------------------------------
+  
+  DE_padj05[[comparison]] <- de
+  
+  DE_padj05_LFC1[[comparison]] <- de_lfc
+  
+  
+  # ----------------------------------------------------------
+  # Save
+  # ----------------------------------------------------------
+  
+  write.csv(
+    de,
+    file.path(
+      "DE_final/padj_0.05",
+      paste0(
+        comparison,
+        "_DE_padj05.csv"
+      )
+    ),
+    row.names = FALSE
+  )
+  
+  
+  write.csv(
+    de_lfc,
+    file.path(
+      "DE_final/padj_0.05_LFC1",
+      paste0(
+        comparison,
+        "_DE_padj05_LFC1.csv"
+      )
+    ),
+    row.names = FALSE
+  )
+}
+
+
+# ============================================================
+# 21. FINAL DE SUMMARY
+# ============================================================
+
+DE_summary <- do.call(
+  rbind,
+  lapply(
+    names(results_list),
+    function(comparison) {
+      
+      df <- as.data.frame(
+        results_list[[comparison]]
+      )
+      
+      sig <- (
+        !is.na(df$padj) &
+          df$padj < padj_cutoff
+      )
+      
+      sig_lfc <- (
+        sig &
+          !is.na(df$log2FoldChange) &
+          abs(df$log2FoldChange) >= lfc_cutoff
+      )
+      
+      up <- (
+        sig_lfc &
+          df$log2FoldChange >= lfc_cutoff
+      )
+      
+      down <- (
+        sig_lfc &
+          df$log2FoldChange <= -lfc_cutoff
+      )
+      
+      data.frame(
+        
+        comparison = comparison,
+        
+        total_DE_padj05 =
+          sum(sig),
+        
+        total_DE_padj05_LFC1 =
+          sum(sig_lfc),
+        
+        upregulated_LFC1 =
+          sum(up),
+        
+        downregulated_LFC1 =
+          sum(down),
+        
+        padj_cutoff =
+          padj_cutoff,
+        
+        log2FC_cutoff =
+          lfc_cutoff,
+        
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+rownames(DE_summary) <- NULL
+
+
+# ============================================================
+# 22. PRINT FINAL SUMMARY
+# ============================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("FINAL DE SUMMARY\n")
+cat("============================================================\n\n")
+
+print(
+  DE_summary,
+  row.names = FALSE
+)
+
+
+# ============================================================
+# 23. SAVE FINAL SUMMARY
+# ============================================================
+
+write.csv(
+  DE_summary,
+  "DE_final/DE_summary_all_13_contrasts.csv",
+  row.names = FALSE
+)
+
+
+# ============================================================
+# 24. FINAL CHECK
+# ============================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("FINAL CHECK\n")
+cat("============================================================\n")
+
+cat(
+  "Number of contrasts:",
+  length(results_list),
+  "\n\n"
+)
+
+cat("Available contrasts:\n\n")
+
+for (x in names(results_list)) {
+  
+  cat(
+    "  ",
+    x,
+    "\n",
+    sep = ""
+  )
+}
+
+
+# ============================================================
+# 25. FINAL SUCCESS MESSAGE
+# ============================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("DESeq2 ANALYSIS COMPLETED SUCCESSFULLY\n")
+cat("============================================================\n")
+
+cat("\nResults object:\n")
+cat("results_list\n")
+
+cat("\nSaved files:\n")
+cat("DESeq2_all_results.RData\n")
+cat("DESeq2_results_QC_summary.csv\n")
+cat("DE_final/DE_summary_all_13_contrasts.csv\n")
+
+cat("\nDE lists saved in:\n")
+cat("DE_final/padj_0.05/\n")
+cat("DE_final/padj_0.05_LFC1/\n")
+
+cat("\n")
+cat("============================================================\n")
