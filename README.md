@@ -8,7 +8,7 @@ In the recorded presentation I am presenting the "MTK25" mice tumour-related res
 ### syngeneic mice tumour data "MTK25" scheme
 <img width="624" height="285" alt="image" src="https://github.com/user-attachments/assets/2d28f16b-48c6-4aaa-8ef2-0124ed24c5d6" />
 
-### biological meaning & introduction
+### biological importance
 The main actors in this study are MTK458, FOLH1 gene (encoding PSMA protein), PRAD (pancreatic adenocarcinoma) and PAAD (prostate adenocarcinoma).
 
 ###
