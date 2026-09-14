@@ -11,6 +11,9 @@ In the recorded presentation I am presenting the "MTK25" mice tumour-related res
 ### biological importance
 The main actors in this study are MTK458, FOLH1 gene (encoding PSMA protein), PRAD (pancreatic adenocarcinoma) and PAAD (prostate adenocarcinoma).
 
-###
+### scripts & relative aims
+
+####TCGA-PAAD
+Is PINK1 biologically important in pancreatic cancer, what genes and pathways are associated with it, does it relate to a neuroendocrine phenotype, and does PINK1 expression have prognostic value for patient survival?
 
 
