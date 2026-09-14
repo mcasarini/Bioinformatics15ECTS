@@ -1,0 +1,795 @@
+# ============================================================
+# MTK25 LOADING + QC CHECK
+# ============================================================
+
+load("C:/Users/Martina/Desktop/New folder/DESeq2_all_results.RData")
+dds <- dds_deseq_list$MTK25
+
+# ============================================================
+# OUTPUT
+# ============================================================
+
+outdir <- "C:/Users/Martina/Desktop/New folder/results/MTK25_analysis/00_MTK25_QC"
+
+dir.create(
+  outdir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+# ------------------------------------------------------------
+# METADATA
+# ------------------------------------------------------------
+
+sample_info <- as.data.frame(
+  colData(dds)
+)
+
+cat(
+  "\n====================================================\n"
+)
+
+cat(
+  "MTK25 SAMPLE INFORMATION\n"
+)
+
+cat(
+  "====================================================\n"
+)
+
+print(sample_info)
+
+# ------------------------------------------------------------
+# COLUMN NAMES
+# ------------------------------------------------------------
+
+cat(
+  "\nMetadata columns:\n"
+)
+
+print(
+  colnames(sample_info)
+)
+
+# ------------------------------------------------------------
+# GENOTYPE
+# ------------------------------------------------------------
+
+cat(
+  "\nGenotype counts:\n"
+)
+
+print(
+  table(
+    sample_info$genotype,
+    useNA = "ifany"
+  )
+)
+
+# ------------------------------------------------------------
+# TREATMENT
+# ------------------------------------------------------------
+
+cat(
+  "\nTreatment counts:\n"
+)
+
+print(
+  table(
+    sample_info$treatment,
+    useNA = "ifany"
+  )
+)
+
+# ------------------------------------------------------------
+# GENOTYPE x TREATMENT
+# ------------------------------------------------------------
+
+cat(
+  "\nGenotype x Treatment:\n"
+)
+
+print(
+  table(
+    sample_info$genotype,
+    sample_info$treatment
+  )
+)
+
+# ------------------------------------------------------------
+# GENDER
+# ------------------------------------------------------------
+
+cat(
+  "\nGender counts:\n"
+)
+
+print(
+  table(
+    sample_info$gender,
+    useNA = "ifany"
+  )
+)
+
+# ------------------------------------------------------------
+# GENDER x GENOTYPE
+# ------------------------------------------------------------
+
+cat(
+  "\nGender x Genotype:\n"
+)
+
+print(
+  table(
+    sample_info$gender,
+    sample_info$genotype
+  )
+)
+
+# ------------------------------------------------------------
+# GENDER x TREATMENT
+# ------------------------------------------------------------
+
+cat(
+  "\nGender x Treatment:\n"
+)
+
+print(
+  table(
+    sample_info$gender,
+    sample_info$treatment
+  )
+)
+
+# ------------------------------------------------------------
+# GENDER x GENOTYPE x TREATMENT
+# ------------------------------------------------------------
+
+cat(
+  "\nGender x Genotype x Treatment:\n"
+)
+
+print(
+  xtabs(
+    ~ gender + genotype + treatment,
+    data = sample_info
+  )
+)
+
+# ------------------------------------------------------------
+# SAMPLE IDs
+# ------------------------------------------------------------
+
+cat(
+  "\nSample IDs:\n"
+)
+
+print(
+  rownames(sample_info)
+)
+
+# ------------------------------------------------------------
+# CHECK FOR MISSING VALUES
+# ------------------------------------------------------------
+
+cat(
+  "\nMissing values:\n"
+)
+
+print(
+  colSums(
+    is.na(sample_info)
+  )
+)
+
+# ------------------------------------------------------------
+# EXPERIMENTAL GROUPS
+# ------------------------------------------------------------
+
+sample_info$Group <- paste(
+  sample_info$genotype,
+  sample_info$treatment,
+  sep = "-"
+)
+
+cat(
+  "\nFour-group design:\n"
+)
+
+print(
+  table(
+    sample_info$Group
+  )
+)
+
+# ------------------------------------------------------------
+# DESIGN FORMULA
+# ------------------------------------------------------------
+
+design(dds) <- ~ genotype + treatment + genotype:treatment
+
+cat(
+  "\nDESeq2 design:\n"
+)
+
+print(
+  design(dds)
+)
+
+# ------------------------------------------------------------
+# RUN DESEQ2
+# ------------------------------------------------------------
+
+dds <- DESeq(dds)
+
+cat(
+  "\nAvailable contrasts:\n"
+)
+
+print(
+  resultsNames(dds)
+)
+
+# ------------------------------------------------------------
+# SAVE QC TABLE
+# ------------------------------------------------------------
+
+write.csv(
+  sample_info,
+  "MTK25_sample_information.csv",
+  row.names = TRUE
+)
+
+cat(
+  "\n====================================================\n"
+)
+
+cat(
+  "MTK25 QC CHECK COMPLETED\n"
+)
+
+cat(
+  "====================================================\n"
+)
+getwd()
+
+# ============================================================
+# 01_MTK25_PCA
+# PCA ANALYSIS
+# ============================================================
+
+
+suppressPackageStartupMessages({
+  
+  library(DESeq2)
+  library(ggplot2)
+  library(ggrepel)
+  library(pheatmap)
+  library(dplyr)
+  
+})
+
+# ============================================================
+# LOAD DATA
+# ============================================================
+
+load(
+  "C:/Users/Martina/Desktop/New folder/DESeq2_all_results.RData"
+)
+
+dds <- dds_deseq_list$MTK25
+
+# ============================================================
+# OUTPUT ROOT
+# ============================================================
+
+outdir <- file.path(
+  "C:/Users/Martina/Desktop/New folder/results",
+  "MTK25_analysis"
+)
+
+dir.create(
+  outdir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+
+# ============================================================
+# PCA DIRECTORIES
+# ============================================================
+
+pca_dir <- file.path(
+  outdir,
+  "01_PCA"
+)
+
+dir.create(
+  pca_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+pca_wtko_dir <- file.path(
+  pca_dir,
+  "PCA01_WT_vs_KO"
+)
+
+pca_mtkctrl_dir <- file.path(
+  pca_dir,
+  "PCA02_MTK_vs_Ctrl"
+)
+
+pca_ctrl_dir <- file.path(
+  pca_dir,
+  "PCA03_WT_vs_KO_within_Ctrl"
+)
+
+pca_mtk_dir <- file.path(
+  pca_dir,
+  "PCA04_WT_vs_KO_within_MTK"
+)
+
+pca_all_dir <- file.path(
+  pca_dir,
+  "PCA05_All_Groups"
+)
+
+dir.create(
+  pca_wtko_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+dir.create(
+  pca_mtkctrl_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+dir.create(
+  pca_ctrl_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+dir.create(
+  pca_mtk_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+dir.create(
+  pca_all_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+# ============================================================
+# PCA FUNCTION
+# ============================================================
+
+make_pca <- function(
+    dds_object,
+    groups,
+    colours,
+    title_text,
+    output_file
+){
+  
+  vst_tmp <- vst(
+    dds_object,
+    blind = TRUE
+  )
+  
+  pca_obj <- prcomp(
+    
+    t(
+      assay(vst_tmp)
+    ),
+    
+    center = TRUE,
+    scale. = FALSE
+  )
+  
+  percent_var <- round(
+    
+    100 * (
+      
+      pca_obj$sdev^2 /
+        
+        sum(
+          pca_obj$sdev^2
+        )
+      
+    ),
+    
+    1
+  )
+  
+  pca_df <- data.frame(
+    
+    Sample =
+      rownames(
+        pca_obj$x
+      ),
+    
+    Group =
+      as.character(groups),
+    
+    PC1 =
+      pca_obj$x[,1],
+    
+    PC2 =
+      pca_obj$x[,2]
+    
+  )
+  
+  # ==========================================================
+  # SAVE COORDINATES
+  # ==========================================================
+  
+  write.csv(
+    
+    pca_df,
+    
+    paste0(
+      
+      tools::file_path_sans_ext(
+        output_file
+      ),
+      
+      "_coordinates.csv"
+      
+    ),
+    
+    row.names = FALSE
+  )
+  
+  # ==========================================================
+  # SAVE VARIANCE
+  # ==========================================================
+  
+  write.csv(
+    
+    data.frame(
+      
+      PC = paste0(
+        "PC",
+        seq_along(percent_var)
+      ),
+      
+      Variance =
+        percent_var
+      
+    ),
+    
+    paste0(
+      
+      tools::file_path_sans_ext(
+        output_file
+      ),
+      
+      "_variance.csv"
+      
+    ),
+    
+    row.names = FALSE
+  )
+  
+  # ==========================================================
+  # BUILD PLOT
+  # ==========================================================
+  
+  p <- ggplot(
+    
+    pca_df,
+    
+    aes(
+      PC1,
+      PC2,
+      colour = Group,
+      fill = Group
+    )
+    
+  )
+  
+  group_sizes <- table(
+    pca_df$Group
+  )
+  
+  if(
+    length(unique(pca_df$Group)) > 1 &&
+    min(group_sizes) >= 3
+  ){
+    
+    p <- p +
+      
+      stat_ellipse(
+        
+        aes(
+          group = Group
+        ),
+        
+        type = "t",
+        
+        geom = "polygon",
+        
+        alpha = 0.15,
+        
+        linewidth = 0.8
+        
+      )
+  }
+  
+  p <- p +
+    
+    geom_point(
+      size = 5
+    ) +
+    
+    geom_text_repel(
+      
+      aes(
+        label = Sample
+      ),
+      
+      size = 3,
+      
+      max.overlaps = 100
+      
+    ) +
+    
+    scale_colour_manual(
+      values = colours
+    ) +
+    
+    scale_fill_manual(
+      values = colours
+    ) +
+    
+    theme_classic(
+      base_size = 14
+    ) +
+    
+    theme(
+      
+      legend.title =
+        element_blank(),
+      
+      plot.title =
+        element_text(
+          face = "bold",
+          hjust = 0.5
+        )
+      
+    ) +
+    
+    labs(
+      
+      title =
+        title_text,
+      
+      x = paste0(
+        "PC1 (",
+        percent_var[1],
+        "%)"
+      ),
+      
+      y = paste0(
+        "PC2 (",
+        percent_var[2],
+        "%)"
+      )
+      
+    )
+  
+  ggsave(
+    
+    output_file,
+    
+    p,
+    
+    width = 7.5,
+    
+    height = 6.5,
+    
+    dpi = 600
+  )
+  
+  return(
+    
+    list(
+      
+      pca =
+        pca_obj,
+      
+      data =
+        pca_df,
+      
+      variance =
+        percent_var
+    )
+  )
+}
+
+# ============================================================
+# PCA01 WT vs KO
+# ============================================================
+
+pca_wtko <- make_pca(
+  
+  dds,
+  
+  colData(dds)$genotype,
+  
+  c(
+    WT = "#0072B2",
+    KO = "#D55E00"
+  ),
+  
+  "MTK25 WT vs KO",
+  
+  file.path(
+    pca_wtko_dir,
+    "PCA_WT_vs_KO.png"
+  )
+)
+
+# ============================================================
+# PCA02 MTK vs CTRL
+# ============================================================
+
+pca_mtkctrl <- make_pca(
+  
+  dds,
+  
+  colData(dds)$treatment,
+  
+  c(
+    Ctrl = "#4E79A7",
+    MTK  = "#59A14F"
+  ),
+  
+  "MTK25 MTK vs Ctrl",
+  
+  file.path(
+    pca_mtkctrl_dir,
+    "PCA_MTK_vs_Ctrl.png"
+  )
+)
+
+# ============================================================
+# PCA03 WT vs KO WITHIN CTRL
+# ============================================================
+
+dds_ctrl <- dds[
+  ,
+  colData(dds)$treatment == "Ctrl"
+]
+
+pca_ctrl <- make_pca(
+  
+  dds_ctrl,
+  
+  colData(dds_ctrl)$genotype,
+  
+  c(
+    WT = "#0072B2",
+    KO = "#D55E00"
+  ),
+  
+  "MTK25 WT vs KO within Ctrl",
+  
+  file.path(
+    pca_ctrl_dir,
+    "PCA_WT_vs_KO_within_Ctrl.png"
+  )
+)
+
+# ============================================================
+# PCA04 WT vs KO WITHIN MTK
+# ============================================================
+
+dds_mtk <- dds[
+  ,
+  colData(dds)$treatment == "MTK"
+]
+
+pca_mtk <- make_pca(
+  
+  dds_mtk,
+  
+  colData(dds_mtk)$genotype,
+  
+  c(
+    WT = "#0072B2",
+    KO = "#D55E00"
+  ),
+  
+  "MTK25 WT vs KO within MTK",
+  
+  file.path(
+    pca_mtk_dir,
+    "PCA_WT_vs_KO_within_MTK.png"
+  )
+)
+
+# ============================================================
+# PCA05 FOUR GROUP DESIGN
+# ============================================================
+
+pca_all <- make_pca(
+  
+  dds,
+  
+  sample_info$Group4,
+  
+  c(
+    
+    "WT-Ctrl" = "#1F77B4",
+    
+    "WT-MTK" = "#2CA02C",
+    
+    "KO-Ctrl" = "#D62728",
+    
+    "KO-MTK" = "#FF7F0E"
+    
+  ),
+  
+  "MTK25 Four Group Design",
+  
+  file.path(
+    pca_all_dir,
+    "PCA_All_Groups.png"
+  )
+)
+
+# ============================================================
+# PCA REPORT
+# ============================================================
+
+cat("\n====================================\n")
+cat("PCA ANALYSIS COMPLETED\n")
+cat("====================================\n")
+cat(pca_dir)
+cat("\n====================================\n")
+
+# ============================================================
+# SAVE OBJECTS FOR SCRIPT 2
+# ============================================================
+
+save(
+  
+  dds,
+  
+  sample_info,
+  
+  vst_obj,
+  vst_mat,
+  
+  dds_ctrl,
+  dds_mtk,
+  
+  pca_wtko,
+  pca_mtkctrl,
+  pca_ctrl,
+  pca_mtk,
+  pca_all,
+  
+  file = file.path(
+    outdir,
+    "MTK25_QC_PCA_objects.RData"
+  )
+)
+
+cat("\n====================================\n")
+cat("MTK25_01_QC_PCA COMPLETED\n")
+cat("====================================\n")
+cat(
+  file.path(
+    outdir,
+    "MTK25_QC_PCA_objects.RData"
+  )
+)
+cat("\n====================================\n")
