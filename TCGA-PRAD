@@ -1,0 +1,4332 @@
+# GLEASON ANALYSIS in TCGA-PRAD: Is the distribution of normalized FOLH1 expression significantly different among low-, intermediate-, and high-Gleason prostate tumors? Is PSMA (FOLH1) expression associated with prostate cancer aggressiveness?
+
+## setup
+base_dir <- "C:/Users/Martina/Desktop/TCGA"
+setwd(base_dir)
+out_dir  <- "C:/Users/Martina/Desktop/TCGA/results"
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+
+## packages
+library(SummarizedExperiment)
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+library(DESeq2)
+library(openxlsx)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(rstatix)
+
+## load TCGA-PRAD
+prad <- readRDS("TCGA_PRAD_clinical.rds")
+se <- prad
+assayNames(se)
+
+## gene extraction
+rd <- as.data.frame(rowData(se))
+ens <- gsub("\\..*", "", rd$gene_id)
+symbols <- mapIds(
+  org.Hs.eg.db,
+  keys = ens,
+  column = "SYMBOL",
+  keytype = "ENSEMBL",
+  multiVals = "first")
+rowData(se)$symbol <- symbols
+folh1_idx <- which(rowData(se)$symbol == "FOLH1")
+stopifnot(length(folh1_idx) > 0)
+
+## normalization + VST
+dds <- DESeqDataSetFromMatrix(
+  countData = assay(se, "unstranded"),
+  colData = colData(se),
+  design = ~ 1)
+dds <- dds[rowSums(counts(dds)) > 0, ]
+dds <- estimateSizeFactors(dds)
+vsd <- vst(dds, blind = TRUE)
+folh1_expr <- assay(vsd)[folh1_idx, ]
+
+## build dataframe
+cd <- as.data.frame(colData(se))
+df <- data.frame(
+  sample  = colnames(se),
+  FOLH1   = as.numeric(folh1_expr),
+  gleason = cd$paper_Reviewed_Gleason_sum,
+  group   = cd$sample_type)
+df <- df %>%
+  filter(group == "Primary Tumor") %>%
+  filter(!is.na(FOLH1) & !is.na(gleason))
+
+## Gleason groups
+df$gleason_group <- case_when(
+  df$gleason <= 6 ~ "Low (≤6)",
+  df$gleason == 7 ~ "Intermediate (7)",
+  df$gleason >= 8 ~ "High (≥8)")
+df$gleason_group <- factor(
+  df$gleason_group,
+  levels = c(
+    "Low (≤6)",
+    "Intermediate (7)",
+    "High (≥8)"))
+
+## statistics 
+overall_stats <- df %>%
+  summarise(
+    n = n(),
+    mean = mean(FOLH1),
+    sd = sd(FOLH1),
+    median = median(FOLH1),
+    IQR = IQR(FOLH1),
+    min = min(FOLH1),
+    max = max(FOLH1))
+
+group_stats <- df %>%
+  group_by(gleason_group) %>%
+  summarise(
+    n = n(),
+    mean = mean(FOLH1),
+    sd = sd(FOLH1),
+    median = median(FOLH1),
+    IQR = IQR(FOLH1),
+    min = min(FOLH1),
+    max = max(FOLH1),
+    .groups = "drop")
+
+kruskal_res <- kruskal.test(FOLH1 ~ gleason_group, data = df)
+kruskal_table <- data.frame(
+  test = "Kruskal-Wallis",
+  statistic = unname(kruskal_res$statistic),
+  df = unname(kruskal_res$parameter),
+  p_value = kruskal_res$p.value)
+
+spearman_res <- cor.test(df$FOLH1, df$gleason, method = "spearman", exact = FALSE)
+spearman_table <- data.frame(
+  method = "Spearman",
+  rho = unname(spearman_res$estimate),
+  p_value = spearman_res$p.value)
+
+pairwise_res <- pairwise_wilcox_test(
+  df,
+  FOLH1 ~ gleason_group,
+  p.adjust.method = "BH")
+
+anova_res <- aov(FOLH1 ~ gleason_group, data = df)
+anova_summary <- summary(anova_res)[[1]]
+anova_table <- data.frame(anova_summary)
+
+tukey_res <- TukeyHSD(anova_res)
+tukey_df <- as.data.frame(tukey_res$gleason_group)
+tukey_df$comparison <- rownames(tukey_df)
+
+eta_sq <- anova_summary$`Sum Sq`[1] / sum(anova_summary$`Sum Sq`)
+effect_size <- data.frame(
+  metric = "eta_squared",
+  value = eta_sq)
+
+get_stars <- function(p) {
+  ifelse(p <= 0.0001, "****",
+         ifelse(p <= 0.001, "***",
+                ifelse(p <= 0.01, "**",
+                       ifelse(p <= 0.05, "*", "ns"))))}
+
+method_comparison <- data.frame(
+  test = c("Kruskal-Wallis", "ANOVA"),
+  statistic = c(
+    unname(kruskal_res$statistic),
+    anova_summary$`F value`[1]),
+  p_value = c(
+    kruskal_res$p.value,
+    anova_summary$`Pr(>F)`[1]),
+  significance = c(
+    get_stars(kruskal_res$p.value),
+    get_stars(anova_summary$`Pr(>F)`[1])))
+
+## summary
+wb <- createWorkbook()
+addWorksheet(wb, "Raw_data")
+writeData(wb, "Raw_data", df)
+addWorksheet(wb, "Overall_stats")
+writeData(wb, "Overall_stats", overall_stats)
+addWorksheet(wb, "Group_stats")
+writeData(wb, "Group_stats", group_stats)
+addWorksheet(wb, "Spearman")
+writeData(wb, "Spearman", spearman_table)
+addWorksheet(wb, "Kruskal_Wallis")
+writeData(wb, "Kruskal_Wallis", kruskal_table)
+addWorksheet(wb, "Pairwise_Wilcoxon")
+writeData(wb, "Pairwise_Wilcoxon", pairwise_res)
+addWorksheet(wb, "ANOVA")
+writeData(wb, "ANOVA", anova_table)
+addWorksheet(wb, "Tukey_HSD")
+writeData(wb, "Tukey_HSD", tukey_df)
+addWorksheet(wb, "Effect_Size")
+writeData(wb, "Effect_Size", effect_size)
+addWorksheet(wb, "Method_Comparison")
+writeData(wb, "Method_Comparison", method_comparison)
+saveWorkbook(wb,
+  file.path(out_dir, "4b_PRAD-TCGA_FOLH1_summary.xlsx"),
+  overwrite = TRUE)
+
+## plot
+p <- ggplot(df, aes(x = gleason_group, y = FOLH1, fill = gleason_group)) +
+  geom_boxplot(width = 0.6, outlier.shape = NA, alpha = 0.85) +
+  geom_jitter(width = 0.15, size = 1, alpha = 0.4) +
+  scale_fill_manual(
+    values = c(
+      "Low (≤6)" = "grey70",
+      "Intermediate (7)" = "orange",
+      "High (≥8)" = "red3"),
+    name = "Gleason group" ) +
+  stat_compare_means(
+    comparisons = comparisons,
+    method = "wilcox.test",
+    label = "p.signif",
+    hide.ns = FALSE,
+    step.increase = 0.1) +
+  theme_bw(base_size = 18) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "grey85", linewidth = 0.4),
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    axis.text.x = element_text(size = 13),
+    axis.title = element_text(size = 14),
+    legend.position = "right") +
+  labs(
+title = "FOLH1 expression\nacross Gleason groups (TCGA-PRAD)",
+    x = "Gleason group",
+    y = "VST-normalized FOLH1 expression")
+print(p)
+ggsave(
+  file.path(out_dir, "4b_PRAD-TCGA_FOLH1_Primary_GleasonScore.pdf"),
+  p,
+  width = 8,
+  height = 5.5)
+
+
+
+# Survival analysis in TCGA-PRAD (501 patients: 10 deaths): 
+Do patients with high vs low FOLH1 have different survival curves?
+
+## setup
+base_dir <- "C:/Users/Martina/Desktop/TCGA"
+out_dir  <- file.path(base_dir, "results")
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+## packages
+library(SummarizedExperiment)
+library(dplyr)
+library(survival)
+library(survminer)
+library(ggplot2)
+library(openxlsx)
+library(showtext)
+library(sysfonts)
+font_add("Arial", "C:/Windows/Fonts/arial.ttf")
+showtext_auto()
+
+## load & check raw data
+prad <- readRDS(file.path(base_dir, "TCGA_PRAD_clinical.rds"))
+expr <- assay(prad, "fpkm_uq_unstrand")
+rd <- as.data.frame(rowData(prad))
+cd <- as.data.frame(colData(prad))
+inspection_list <- list(
+  expression_assays = assayNames(prad),
+  expression_dim = dim(expr),
+  rowData_columns = colnames(rd),
+  colData_columns = colnames(cd),
+  rowData_preview = head(rd),
+  colData_preview = head(cd),
+  vital_status_table = table(cd$vital_status),
+  sample_type_table = table(cd$sample_type),
+  missing_values_colData = colSums(is.na(cd)),
+  missing_values_rowData = colSums(is.na(rd)))
+stopifnot("gene_name" %in% colnames(rd))
+stopifnot(all(colnames(expr) == rownames(cd)))
+
+## FOLH1 extraction
+folh1_idx <- which(rd$gene_name == "FOLH1")
+if(length(folh1_idx) == 0){
+  stop("FOLH1 not found.")}
+if(length(folh1_idx) > 1){
+  warning("Multiple FOLH1 entries found; using first.")}
+folh1 <- as.numeric(expr[folh1_idx[1], ])
+folh1_info <- rd[folh1_idx[1], c("gene_id","gene_name","gene_type")]
+
+## survival variables
+OS_time <- ifelse( cd$vital_status == "Dead", cd$days_to_death, cd$days_to_last_follow_up ) 
+OS_event <- ifelse( cd$vital_status == "Dead", 1, 0 )
+
+## build dataframe
+df <- data.frame(
+  FOLH1 = folh1,
+  OS_time = OS_time,
+  OS_event = OS_event,
+  sample_type = cd$sample_type)
+df <- df %>%
+  filter(
+    sample_type == "Primary Tumor",
+    !is.na(FOLH1),
+    !is.na(OS_time),
+    !is.na(OS_event))
+df$logFOLH1 <- log2(df$FOLH1 + 1)
+df$FOLH1_group <- factor(
+  ifelse(df$FOLH1 >= median(df$FOLH1, na.rm = TRUE), "High", "Low"),
+  levels = c("Low", "High"))
+cat("Patients:", nrow(df), "\n")
+cat("Deaths:", sum(df$OS_event), "\n")
+if(sum(df$OS_event) < 20){
+  warning("Low number of events → survival analysis underpowered")}
+
+## survival
+surv_obj <- Surv(df$OS_time, df$OS_event)
+
+## significance function
+get_sig <- function(p){
+  if(is.na(p)) return(NA)
+  else if(p < 0.0001) return("****")
+  else if(p < 0.001) return("***")
+  else if(p < 0.01) return("**")
+  else if(p < 0.05) return("*")
+  else return("ns")}
+
+## Cox model
+cox_cont <- coxph(surv_obj ~ logFOLH1, data = df)
+cox_cont_sum <- summary(cox_cont)
+cox_cont_results <- data.frame(
+  HR = cox_cont_sum$coefficients[, "exp(coef)"],
+  lower95 = cox_cont_sum$conf.int[, "lower .95"],
+  upper95 = cox_cont_sum$conf.int[, "upper .95"],
+  p_value = cox_cont_sum$coefficients[, "Pr(>|z|)"])
+cox_cont_results$significance <- sapply(cox_cont_results$p_value, get_sig)
+cox_group <- coxph(surv_obj ~ FOLH1_group, data = df)
+cox_group_sum <- summary(cox_group)
+cox_group_results <- data.frame(
+  HR = cox_group_sum$coefficients[, "exp(coef)"],
+  lower95 = cox_group_sum$conf.int[, "lower .95"],
+  upper95 = cox_group_sum$conf.int[, "upper .95"],
+  p_value = cox_group_sum$coefficients[, "Pr(>|z|)"])
+cox_group_results$significance <- sapply(cox_group_results$p_value, get_sig)
+
+## Kaplan-Meier 
+fit <- survfit(surv_obj ~ FOLH1_group, data = df)
+surv_diff <- survdiff(surv_obj ~ FOLH1_group, data = df)
+km_p <- 1 - pchisq(surv_diff$chisq, df = 1)
+HR  <- round(cox_group_sum$coefficients[, "exp(coef)"], 2)
+LCL <- round(cox_group_sum$conf.int[, "lower .95"], 2)
+UCL <- round(cox_group_sum$conf.int[, "upper .95"], 2)
+subtitle_text <- paste0(
+  "Hazard ratio = ", HR,
+  " (95% CI ", LCL, "–", UCL, "); ",
+  "Log-rank p = ", signif(km_p, 3))
+km_plot <- ggsurvplot(
+  fit,
+  data = df,
+  risk.table = TRUE,
+  risk.table.height = 0.24,
+  conf.int = FALSE,
+  censor = TRUE,
+  censor.shape = 3,
+  censor.size = 2.5,
+  pval = FALSE,
+  palette = c("#4D4D4D", "#C00000"),
+  legend.title = "FOLH1 expression",
+  legend.labs = c(
+    "Low (median split)",
+    "High (median split)"),
+  xlab = "Time (days)",
+  ylab = "Overall survival probability",
+  break.time.by = 365,
+  ggtheme = theme_classic(base_size = 16),
+  tables.theme = theme_cleantable(),
+  risk.table.y.text = FALSE,
+  risk.table.fontsize = 4)
+km_plot$plot <- km_plot$plot +
+  labs(
+    title = "Overall survival according to FOLH1 expression in TCGA-PRAD",
+    subtitle = subtitle_text) +
+  coord_cartesian(ylim = c(0.60, 1.00)) +
+  theme(
+    plot.title = element_text(
+      face = "bold",
+      size = 18,
+      hjust = 0.5),
+    plot.subtitle = element_text(
+      size = 13,
+      hjust = 0.5),
+    axis.title = element_text(size = 15),
+    axis.text = element_text(size = 13),
+    legend.position = "top",
+    legend.title = element_text(size = 13),
+    legend.text = element_text(size = 12))
+pdf(file.path(out_dir, "TCGA_PRAD_FOLH1_KM.pdf"), width = 10, height = 8)
+print(km_plot)
+dev.off()
+ggsave(
+  filename = file.path(out_dir, "5_TCGA-PRAD_FOLH1_KaplanMeier.pdf"),
+  plot = km_plot$plot,
+  width = 10,
+  height = 7)
+
+## summary
+wb <- createWorkbook()
+dataset_summary <- data.frame(
+  n_patients = nrow(df),
+  n_events = sum(df$OS_event),
+  n_censored = sum(df$OS_event == 0),
+  event_rate_percent = round(mean(df$OS_event) * 100, 2),
+  median_followup_days = median(df$OS_time),
+  median_FOLH1 = median(df$FOLH1),
+  median_logFOLH1 = median(df$logFOLH1))
+group_summary <- df %>%
+  group_by(FOLH1_group) %>%
+  summarise(
+    n = n(),
+    events = sum(OS_event),
+    censored = sum(OS_event == 0),
+    event_rate = round(mean(OS_event) * 100, 2),
+    median_FOLH1 = median(FOLH1),
+    median_OS_time = median(OS_time),
+    .groups = "drop")
+inspection_df <- data.frame(
+  metric = c(
+    "Total samples",
+    "Primary tumor samples",
+    "Deaths",
+    "Censored",
+    "Median survival (days)"),
+  value = c(
+    nrow(cd),
+    sum(cd$sample_type == "Primary Tumor"),
+    sum(OS_event),
+    sum(OS_event == 0),
+    median(OS_time)))
+logrank_df <- data.frame(
+  chi_square = surv_diff$chisq,
+  df = 1,
+  p_value = km_p,
+  significance = get_sig(km_p))
+analysis_note <- data.frame(
+  note = paste0(
+    "TCGA-PRAD survival analysis includes ",
+    nrow(df),
+    " patients with ",
+    sum(df$OS_event),
+    " death events. Analysis is exploratory due to low event rate."))
+addWorksheet(wb, "Dataset_Summary")
+writeData(wb, "Dataset_Summary", dataset_summary)
+addWorksheet(wb, "Group_Summary")
+writeData(wb, "Group_Summary", group_summary)
+addWorksheet(wb, "FOLH1_Info")
+writeData(wb, "FOLH1_Info", folh1_info)
+addWorksheet(wb, "Inspection")
+writeData(wb, "Inspection", inspection_df)
+addWorksheet(wb, "Cox_Continuous")
+writeData(wb, "Cox_Continuous", cox_cont_results)
+addWorksheet(wb, "Cox_Group")
+writeData(wb, "Cox_Group", cox_group_results)
+addWorksheet(wb, "LogRank")
+writeData(wb, "LogRank", logrank_df)
+addWorksheet(wb, "Note")
+writeData(wb, "Note", analysis_note)
+saveWorkbook(
+  wb,
+  file.path(out_dir, "5_TCGA-PRAD_FOLH1_Survival_Summary.xlsx"),
+  overwrite = TRUE)
+
+
+# Cox model analysis in TCGA-PRAD: Is FOLH1 expression linearly associated with hazard of death?
+
+## setup
+base_dir <- "C:/Users/Martina/Desktop/TCGA"
+out_dir  <- file.path(base_dir, "results")
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+setwd(base_dir)
+
+## packages
+library(SummarizedExperiment)
+library(dplyr)
+library(survival)
+library(survminer)
+library(ggplot2)
+library(openxlsx)
+library(splines)
+library(showtext)
+library(sysfonts)
+font_add("Arial", "C:/Windows/Fonts/arial.ttf")
+showtext_auto()
+
+## load & check raw data
+prad <- readRDS( file.path(base_dir, "TCGA_PRAD_clinical.rds") )
+expr <- assay(prad, "fpkm_uq_unstrand")
+rd <- as.data.frame(rowData(prad))
+cd <- as.data.frame(colData(prad))
+stopifnot(all(colnames(expr) == rownames(cd)))
+
+## FOLH1 extraction
+folh1_idx <- which(rd$gene_name == "FOLH1")
+stopifnot(length(folh1_idx) > 0)
+folh1 <- as.numeric(expr[folh1_idx[1], ])
+
+## survival variables
+OS_time <- ifelse(cd$vital_status == "Dead",
+                  cd$days_to_death,
+                  cd$days_to_last_follow_up)
+OS_event <- ifelse(cd$vital_status == "Dead", 1, 0)
+
+## build dataframe
+df <- data.frame(
+  FOLH1 = folh1,
+  OS_time = as.numeric(OS_time),
+  OS_event = OS_event,
+  sample_type = cd$sample_type)
+df <- df %>%
+  filter(sample_type == "Primary Tumor") %>%
+  filter(!is.na(FOLH1), !is.na(OS_time), !is.na(OS_event)) %>%
+  filter(OS_time > 0)
+df$logFOLH1 <- log2(df$FOLH1 + 1)
+cat("Patients:", nrow(df), "\n")
+cat("Deaths:", sum(df$OS_event), "\n")
+
+## survival object
+surv_obj <- Surv(df$OS_time, df$OS_event)
+
+## linear Cox model & ph assumption test
+cox_lin <- coxph(surv_obj ~ logFOLH1, data = df)
+sum_lin <- summary(cox_lin)
+hr   <- sum_lin$coefficients[,"exp(coef)"]
+low  <- sum_lin$conf.int[,"lower .95"]
+up   <- sum_lin$conf.int[,"upper .95"]
+pval <- sum_lin$coefficients[,"Pr(>|z|)"]
+cox_results <- data.frame(
+  Variable = "FOLH1 (log2)",
+  HR = hr,
+  lower95 = low,
+  upper95 = up,
+  z = sum_lin$coefficients[,"z"],
+  p_value = pval)
+ph_test <- cox.zph(cox_lin)
+ph_results <- as.data.frame(ph_test$table)
+ph_results$variable <- rownames(ph_results)
+
+## non-linear model (spinel)
+cox_spline <- coxph(
+  surv_obj ~ ns(logFOLH1, df = 3),
+  data = df)
+spline_comp <- anova(cox_lin, cox_spline)
+print(spline_comp)
+
+## martingale residual check
+mart_res <- residuals(cox_lin, type = "martingale")
+mart_df <- data.frame(
+  logFOLH1 = df$logFOLH1,
+  martingale = mart_res)
+p_martingale <- ggplot(mart_df, aes(logFOLH1, martingale)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "loess", se = TRUE) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_bw() +
+  labs(
+    title = "Martingale residuals: linearity check",
+    x = "log2(FOLH1 + 1)",
+    y = "Residuals")
+ggsave(
+  file.path(out_dir, "6_TCGA-PRAD_FOLH1_martingalecheck.pdf"),
+  p_martingale,
+  width = 7,
+  height = 5)
+
+## forest plot
+forest_df <- data.frame(
+  Variable = "FOLH1 (log2)",
+  HR = hr,
+  lower = low,
+  upper = up)
+subtitle_text <- paste0(
+  "HR=", round(hr,2),
+  " (95% CI ", round(low,2), "-", round(up,2), ")",
+  " | p=", signif(pval,3))
+p_forest <- ggplot(forest_df, aes(x = Variable, y = HR)) +
+  geom_point(size = 4) +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.1) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  scale_y_log10() +
+  coord_flip() +
+  theme_bw(base_size = 14) +
+  labs(
+    title = "TCGA-PRAD: Cox model (FOLH1)",
+    subtitle = subtitle_text,
+    x = "",
+    y = "Hazard Ratio")
+ggsave(
+  file.path(out_dir, "6_TACGA-PRAD_FOLH1_forest.pdf"),
+  p_forest,
+  width = 7,
+  height = 5)
+
+## spline plot (hazard shape)
+grid <- seq(min(df$logFOLH1), max(df$logFOLH1), length.out = 100)
+pred_df <- data.frame(logFOLH1 = grid)
+fit <- predict(cox_spline, newdata = pred_df, type = "lp", se.fit = TRUE)
+pred_df$fit <- fit$fit
+pred_df$upper <- fit$fit + 1.96 * fit$se.fit
+pred_df$lower <- fit$fit - 1.96 * fit$se.fit
+p_spline <- ggplot(pred_df, aes(logFOLH1, exp(fit))) +
+  geom_line() +
+  geom_ribbon(aes(ymin = exp(lower), ymax = exp(upper)), alpha = 0.2) +
+  theme_bw() +
+  labs(
+    title = "Non-linear effect of FOLH1 on hazard (spline model)",
+    x = "log2(FOLH1 + 1)",
+    y = "Hazard Ratio (relative)")
+ggsave(
+  file.path(out_dir, "6_TCGA-PRAD_FOLH1_spline.pdf"),
+  p_spline,
+  width = 7,
+  height = 5)
+
+## summary
+dataset_summary <- data.frame(
+  n_patients = nrow(df),
+  n_events = sum(df$OS_event),
+  event_rate = round(mean(df$OS_event) * 100, 2),
+  median_OS = median(df$OS_time),
+  median_FOLH1 = median(df$FOLH1),
+  median_logFOLH1 = median(df$logFOLH1))
+wb <- createWorkbook()
+addWorksheet(wb, "Summary")
+writeData(wb, "Summary", dataset_summary)
+addWorksheet(wb, "Cox_Linear")
+writeData(wb, "Cox_Linear", cox_results)
+addWorksheet(wb, "PH_Test")
+writeData(wb, "PH_Test", ph_results)
+addWorksheet(wb, "Spline_Comparison")
+writeData(wb, "Spline_Comparison", spline_comp)
+addWorksheet(wb, "Raw_Data")
+writeData(wb, "Raw_Data", df)
+saveWorkbook(
+  wb,
+  file.path(out_dir, "6_TCGA-PRAD_FOLH1_summary.xlsx"),
+  overwrite = TRUE)
+
+
+# PATHOLOGICAL STAGE ANALYSIS in TCGA-PRAD: Is FOLH1 (PSMA) expression associated with pathological tumor extent (T stage) in prostate cancer?
+
+## setup
+base_dir <- "C:/Users/Martina/Desktop/TCGA"
+setwd(base_dir)
+out_dir <- file.path(base_dir, "results")
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+
+## packages
+library(SummarizedExperiment)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(dplyr)
+library(ggplot2)
+library(rstatix)
+library(openxlsx)
+library(ggpubr)
+library(showtext)
+font_add("Arial", "C:/Windows/Fonts/arial.ttf")
+showtext_auto()
+
+## load TCGA-PRAD 
+prad <- readRDS("TCGA_PRAD_clinical.rds")
+
+## extract FOLH1 
+rd <- as.data.frame(rowData(prad))
+ens <- gsub("\\..*", "", rd$gene_id)
+symbols <- mapIds(
+  org.Hs.eg.db,
+  keys = ens,
+  column = "SYMBOL",
+  keytype = "ENSEMBL",
+  multiVals = "first")
+rd$symbol <- symbols
+folh1_idx <- which(rd$symbol == "FOLH1")
+if(length(folh1_idx) == 0){
+  stop("FOLH1 not found.")}
+folh1 <- as.numeric(
+  assay(prad)[folh1_idx[1], ])
+
+## build dataframe & clean
+cd <- as.data.frame(colData(prad))
+df <- data.frame(
+  sample = colnames(prad),
+  FOLH1 = folh1,
+  stage = cd$ajcc_pathologic_t,
+  sample_type = cd$sample_type)
+df_stage <- df %>%
+  filter(sample_type == "Primary Tumor")
+df <- df %>%
+  mutate(
+    stage_group = case_when(
+      !is.na(stage) & grepl("^T2", stage) ~ "T2",
+      !is.na(stage) & grepl("^T3", stage) ~ "T3",
+      !is.na(stage) & grepl("^T4", stage) ~ "T4",
+      TRUE ~ NA_character_))
+df <- df %>% filter(!is.na(stage_group))
+df$stage_group <- factor(df$stage_group, levels = c("T2", "T3", "T4"))
+
+## log transform FOLH1
+df$logFOLH1 <- log2(df$FOLH1 + 1)
+
+## primary statistics
+kruskal_res <- kruskal_test(df, logFOLH1 ~ stage_group)
+eta2 <- kruskal_effsize(df, logFOLH1 ~ stage_group)
+kw_p <- kruskal_res$p
+kw_sig <- ifelse(
+  kw_p < 0.0001, "****",
+  ifelse(
+    kw_p < 0.001, "***",
+    ifelse(
+      kw_p < 0.01, "**",
+      ifelse(
+        kw_p < 0.05, "*",
+        "ns"))))
+summary_stats <- df %>%
+  group_by(stage_group) %>%
+  summarise(
+    n = n(),
+    mean_logFOLH1 = mean(logFOLH1),
+    median_logFOLH1 = median(logFOLH1),
+    sd_logFOLH1 = sd(logFOLH1),
+    min_logFOLH1 = min(logFOLH1),
+    max_logFOLH1 = max(logFOLH1),
+    .groups = "drop")
+
+## pairwise comparison (Dunn test, BH correction)
+pairwise <- dunn_test(
+  df,
+  logFOLH1 ~ stage_group,
+  p.adjust.method = "BH") %>%
+  mutate(
+    significance = case_when(
+      p.adj < 0.0001 ~ "",
+      p.adj < 0.001 ~ "*",
+      p.adj < 0.01 ~ "",
+      p.adj < 0.05 ~ "*",
+      TRUE ~ "ns"))
+
+## secondary statistics: ANOVA
+anova_model <- aov(logFOLH1 ~ stage_group, data = df)
+anova_table <- as.data.frame(summary(anova_model)[[1]])
+anova_table$term <- rownames(anova_table)
+rownames(anova_table) <- NULL
+tukey <- TukeyHSD(anova_model)$stage_group
+tukey_df <- as.data.frame(tukey)
+tukey_df$comparison <- rownames(tukey_df)
+rownames(tukey_df) <- NULL
+
+## summary
+wb <- createWorkbook()
+addWorksheet(wb, "Summary_stats")
+writeData(wb, "Summary_stats", summary_stats)
+addWorksheet(wb, "Kruskal_Wallis")
+writeData(wb, "Kruskal_Wallis", kruskal_res)
+addWorksheet(wb, "Effect_size_eta2")
+writeData(wb, "Effect_size_eta2", eta2)
+addWorksheet(wb, "Pairwise_Dunn")
+writeData(wb, "Pairwise_Dunn", pairwise)
+addWorksheet(wb, "ANOVA_optional")
+writeData(wb, "ANOVA_optional", anova_table)
+addWorksheet(wb, "Tukey_optional")
+writeData(wb, "Tukey_optional", tukey_df)
+saveWorkbook(wb,
+  file.path(out_dir, "7_TCGA-PRAD_FOLH1_Tstage_analysis.xlsx"),
+  overwrite = TRUE)
+
+## plot
+p <- ggplot(df, aes(x = stage_group, y = logFOLH1, fill = stage_group)) +
+  geom_boxplot(width = 0.6, outlier.shape = NA, alpha = 0.8) +
+  geom_jitter(width = 0.15, size = 1.2, alpha = 0.4) +
+  scale_fill_manual(values = c("T2" = "grey70", "T3" = "orange", "T4" = "red3")) +
+  theme_bw(base_size = 16) +
+  theme(
+    legend.position = "none",
+    text = element_text(family = "Arial"),
+    panel.grid.major = element_line(linewidth = 0.3),
+    panel.grid.minor = element_line(linewidth = 0.3)) +
+  labs(
+    title = "FOLH1 expression across pathological T stage",
+    subtitle = paste0(
+      "Kruskal-Wallis test: ",
+      kw_sig,
+      " (p = ",
+      signif(kw_p, 3),
+      ") | eta² = ",
+      round(eta2$effsize, 3)),
+    x = "Pathological T stage",
+    y = "log2(FOLH1 + 1)")
+print(p)
+ggsave( file.path(out_dir, "7_TCGA-PRAD_FOLH1_Tstage_plot.pdf"), p, width = 6.5, height = 5.5 )
+# Association of FOLH1 expression with PSA, AR activity and ERG fusion in TCGA-PRAD: Does FOLH1 reflect AR pathway activity? Is FOLH1 linked to clinical PSA levels? Does ERG fusion status define FOLH1 expression differences? Is FOLH1 linked to androgen-driven biology? 
+
+## setup 
+base_dir <- "C:/Users/Martina/Desktop/TCGA" 
+setwd(base_dir) 
+out_dir <- file.path(base_dir, "results") 
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE) 
+
+## packages 
+library(SummarizedExperiment) 
+library(dplyr) 
+library(ggplot2) 
+library(openxlsx) 
+library(ggpubr) 
+library(AnnotationDbi) 
+library(org.Hs.eg.db) 
+
+## load & check data 
+prad <- readRDS("TCGA_PRAD_clinical.rds") 
+mat <- assay(prad, "tpm_unstrand") 
+cd <- as.data.frame(colData(prad))
+keep <- which(cd$sample_type == "Primary Tumor")
+mat <- mat[, keep]
+cd <- cd[keep, ]
+class(prad) 
+assayNames(prad) 
+dim(assay(prad)) 
+prad_class <- paste(class(prad), collapse = "; ") 
+assays_available <- paste(assayNames(prad), collapse = "; ") 
+assay_dim <- paste(dim(assay(prad)), collapse = " x ") 
+qc <- data.frame(
+  class = prad_class,
+  assays = assays_available,
+  original_matrix = paste(dim(assay(prad)), collapse = " x "),
+  analysed_matrix = paste(dim(mat), collapse = " x "))
+
+## gene annotation (ENSEMBL → SYMBOL) 
+gene_ids <- gsub("\\..*", "", rownames(mat))
+symbols <- mapIds(
+  org.Hs.eg.db,
+  keys = gene_ids,
+  column = "SYMBOL",
+  keytype = "ENSEMBL",
+  multiVals = "first")
+symbol_table <- data.frame(
+  ensembl = gene_ids,
+  symbol = symbols,
+  row_index = seq_along(gene_ids),
+  stringsAsFactors = FALSE)
+folh1_idx <- which(symbol_table$symbol == "FOLH1")
+FOLH1_raw <- as.numeric(mat[folh1_idx, ])
+
+## build dataframe 
+df <- data.frame(
+  sample = colnames(mat),
+  FOLH1 = FOLH1_raw,
+  PSA = as.numeric(cd$paper_PSA_preop),
+  AR_score = as.numeric(cd$paper_AR_score),
+  ERG_status = factor(cd$paper_ERG_status),
+  stringsAsFactors = FALSE)
+df$logFOLH1 <- log2(df$FOLH1 + 1)
+df$ERG_status <- factor(df$ERG_status, levels = c("none", "fusion"))
+
+## significance 
+sig_star <- function(p) { 
+  if (p < 0.001) return("***") else 
+    if (p < 0.01) return("**") else 
+      if (p < 0.05) return("*") else 
+        return("ns")} 
+
+## plot
+plot_cor <- function(data, x, y, title, file, xlab, ylab){
+  d <- data %>% filter(!is.na(.data[[x]]), !is.na(.data[[y]]))
+  ct <- cor.test(d[[x]], d[[y]], method = "spearman")
+  star <- sig_star(ct$p.value)
+  subtitle <- paste0(
+    " Spearman ρ = ", round(ct$estimate, 3),
+    " | p = ", signif(ct$p.value, 3),
+    " (", star, ")",
+    " | n = ", nrow(d))
+  p <- ggplot(d, aes(x = .data[[x]], y = .data[[y]])) +
+    geom_point(alpha = 0.6, size = 2) +
+    geom_smooth(method = "loess", se = TRUE, linewidth = 0.8) +
+    theme_bw(base_size = 14) +
+    labs(
+      title = title,
+      subtitle = subtitle,
+      x = xlab,
+      y = ylab) +
+    theme(
+      panel.grid.major = element_line(linewidth = 0.3),
+      panel.grid.minor = element_line(linewidth = 0.3))
+  ggsave(file.path(out_dir, file), p, width = 6.5, height = 5.5)
+  return(data.frame(
+    comparison = title,
+    rho = unname(ct$estimate),
+    p_value = ct$p.value,
+    significance = star,
+    n = nrow(d)))}
+
+## PSA correlation 
+psa_stats <- plot_cor(
+  df,
+  "logFOLH1",
+  "PSA",
+  "FOLH1 vs PSA in TCGA-PRAD",
+  "8a_TCGA-PRAD_FOLH1vsPSA.pdf",
+  "log2(FOLH1 TPM + 1)",
+  "Pre-operative PSA")
+
+
+## AR score analysis 
+ar_stats <- plot_cor(
+  df,
+  "logFOLH1",
+  "AR_score",
+  "FOLH1 vs AR activity score",
+  "8a_TCGA-PRAD_FOLH1vsARscore.pdf",
+  "log2(FOLH1 TPM + 1)",
+  "AR activity score")
+
+## ERG fusion analysis 
+df_erg <- df %>% filter(!is.na(logFOLH1), !is.na(ERG_status))
+w <- wilcox.test(logFOLH1 ~ ERG_status, data = df_erg)
+star <- sig_star(w$p.value)
+subtitle <- paste0(
+  "Wilcoxon p = ",
+  signif(w$p.value,3),
+  " (", star, ")",
+  " | n = ",
+  nrow(df_erg))
+p_erg <- ggplot(df_erg, aes(x = ERG_status, y = logFOLH1, fill = ERG_status)) +
+  geom_boxplot(outlier.shape = NA, width = 0.6, alpha = 0.8) +
+  geom_jitter(width = 0.15, alpha = 0.5, size = 1.5) +
+  theme_bw(base_size = 14) +
+  labs(
+    title = "FOLH1 expression by ERG fusion status",
+    subtitle = subtitle,
+    x = "ERG status",
+    y = "log2(FOLH1 + 1)") +
+  theme(legend.position = "none")
+ggsave(file.path(out_dir, "8a_TCGA-PRAD_FOLH1vsERGfusion.pdf"),
+       p_erg, width = 6.5, height = 5.5)
+erg_stats <- data.frame(
+  comparison = "ERG status",
+  p_value = w$p.value,
+  significance = star,
+  n = nrow(df_erg))
+
+## multivariate model (clinical independence test)
+df_multi <- df %>%
+  filter(!is.na(logFOLH1),
+         !is.na(PSA),
+         !is.na(AR_score),
+         !is.na(ERG_status))
+model <- lm(logFOLH1 ~ PSA + AR_score + ERG_status, data = df_multi)
+model_table <- as.data.frame(summary(model)$coefficients)
+model_table$Variable <- rownames(model_table)
+rownames(model_table) <- NULL
+model_table <- dplyr::select(
+  model_table,
+  Variable,
+  Estimate,
+  `Std. Error`,
+  `t value`,
+  `Pr(>|t|)`)
+model_table$Significance <- sapply(model_table$`Pr(>|t|)`, sig_star)
+stats_all <- bind_rows(psa_stats, ar_stats, erg_stats)
+stats_all$p_adj_BH <- p.adjust(stats_all$p_value, method = "BH")
+stats_all$BH_significance <- sapply(stats_all$p_adj_BH, sig_star)
+
+capture.output(
+  summary(model),
+  file = file.path(out_dir, "8a_TCGA-PRAD_MultivariateModel.txt"))
+
+## summary 
+wb <- createWorkbook()
+addWorksheet(wb, "QC")
+writeData(wb, "QC", data.frame(
+  class = prad_class,
+  assays = assays_available,
+  dim = assay_dim))
+addWorksheet(wb, "PSA")
+writeData(wb, "PSA", psa_stats)
+addWorksheet(wb, "AR")
+writeData(wb, "AR", ar_stats)
+addWorksheet(wb, "ERG")
+writeData(wb, "ERG", erg_stats)
+addWorksheet(wb, "Multivariate")
+writeData(wb, "Multivariate", model_table)
+addWorksheet(wb, "Summary")
+writeData(wb, "Summary", stats_all)
+saveWorkbook(wb, file.path(out_dir, "8a_TCGA-PRAD_ClinicalAssociation_summary.xlsx"), overwrite = TRUE)
+
+# Relationship between FOLH1 expression and the Androgen Receptor Pathway in TCGA-PRAD: Is FOLH1 expression associated with androgen receptor signaling? Does FOLH1 increase together with TMPRSS2 expression? Does ERG fusion define tumors with different FOLH1 expression?
+
+## setup
+base_dir <- "C:/Users/Martina/Desktop/TCGA"
+setwd(base_dir)
+out_dir <- file.path(base_dir, "results")
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+
+## packages
+library(SummarizedExperiment)
+library(dplyr)
+library(ggplot2)
+library(openxlsx)
+library(ggpubr)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+
+## load & check data
+prad <- readRDS("TCGA_PRAD_clinical.rds")
+class(prad)
+assayNames(prad)
+dim(assay(prad))
+prad_class <- paste(class(prad), collapse = "; ")
+assays_available <- paste(assayNames(prad), collapse = "; ")
+assay_dim <- paste(dim(assay(prad)), collapse = " x ")
+mat <- assay(prad, "tpm_unstrand")
+cd <- as.data.frame(colData(prad))
+keep_samples <- rownames(cd)[cd$sample_type == "Primary Tumor"]
+cd <- cd[keep_samples, , drop = FALSE]
+mat <- mat[, keep_samples, drop = FALSE]
+
+## gene annotation (ENSEMBL → SYMBOL)
+gene_ids <- gsub("\\..*", "", rownames(mat))
+symbols <- mapIds(
+  org.Hs.eg.db,
+  keys = gene_ids,
+  column = "SYMBOL",
+  keytype = "ENSEMBL",
+  multiVals = "first")
+rownames(mat) <- gene_ids
+
+## extract genes
+genes <- c(
+  "FOLH1",,
+  "KLK3",
+  "FKBP5",
+  "NKX3-1",
+  "TMPRSS2",
+  "ERG")
+gene_index <- match(genes, symbols)
+if(any(is.na(gene_index))){
+  stop(paste(
+      "missing genes:",
+      paste(genes[is.na(gene_index)], collapse = ", ")))}
+expr <- t(mat[gene_index, , drop = FALSE])
+colnames(expr) <- genes
+expr <- as.data.frame(log2(expr + 1))
+
+## build dataframe
+df <- data.frame(
+  sample = keep_samples,
+  PSA = suppressWarnings(as.numeric(cd$paper_PSA_preop)),
+  AR_score = suppressWarnings(as.numeric(cd$paper_AR_score)),
+  ERG_status = factor(cd$paper_ERG_status),
+  sample_type = cd$sample_type,
+  stringsAsFactors = FALSE)
+df <- df %>% filter(sample_type == "Primary Tumor")
+stopifnot(nrow(df) == nrow(expr))
+stopifnot(all(df$sample == rownames(expr)))
+df$ERG_status <- factor(df$ERG_status,levels = c("none", "fusion"))
+df <- cbind(df, expr)
+str(df)
+head(df)
+
+## significance
+sig_star <- function(p) {
+  if (p < 0.001) return("***")
+  else if (p < 0.01) return("**")
+  else if (p < 0.05) return("*")
+  else return("ns")}
+
+## correlation analysis & plot
+plot_correlation <- function(data,
+                             xvar,
+                             yvar,
+                             xlab,
+                             ylab,
+                             title,
+                             filename){
+  df_plot <- data %>%
+    filter(!is.na(.data[[xvar]]),
+           !is.na(.data[[yvar]]))
+  cor_res <- cor.test(
+    df_plot[[xvar]],
+    df_plot[[yvar]],
+    method = "spearman")
+  star <- sig_star(cor_res$p.value)
+  
+  p <- ggplot(df_plot,
+              aes(x = .data[[xvar]],
+                  y = .data[[yvar]])) +
+    geom_point(alpha = 0.6, size = 2) +
+    geom_smooth(
+      method = "loess",
+      se = TRUE,
+      linewidth = 0.8)+
+    theme_bw(base_size = 14) +
+    theme(
+      panel.grid.major = element_line(linewidth = 0.3),
+      panel.grid.minor = element_line(linewidth = 0.3)) +
+    labs(
+      title = title,
+      subtitle = paste0(
+        "Spearman's rho = ",
+        round(cor_res$estimate, 3),
+        " | p = ",
+        signif(cor_res$p.value, 3),
+        " (", star, ")",
+        " | n = ",
+        nrow(df_plot)),
+      x = xlab,
+      y = ylab)
+  
+  ggsave(
+    file.path(out_dir, filename),
+    p,
+    width = 6.5,
+    height = 5.5)
+  data.frame(
+    comparison = title,
+    rho = unname(cor_res$estimate),
+    p_value = cor_res$p.value,
+    significance = star,
+    n = nrow(df_plot))}
+
+## FOLH1 vs KLK3 correlation
+stats_KLK3 <- plot_correlation(
+  df,
+  "FOLH1",
+  "KLK3",
+  "log2(FOLH1 TPM + 1)",
+  "log2(KLK3 TPM + 1)",
+  "FOLH1 vs KLK3 expression",
+  "8b_TCGA-PRAD_FOLH1vsKLK3.pdf")
+
+## FOLH1 vs FKBP5 correlation
+stats_FKBP5 <- plot_correlation(
+  df,
+  "FOLH1",
+  "FKBP5",
+  "log2(FOLH1 TPM + 1)",
+  "log2(FKBP5 TPM + 1)",
+  "FOLH1 vs FKBP5 expression",
+  "8b_TCGA-PRAD_FOLH1vsFKBP5.pdf")
+
+## FOLH1 vs NKX3-1
+stats_NKX31 <- plot_correlation(
+  df,
+  "FOLH1",
+  "NKX3-1",
+  "log2(FOLH1 TPM + 1)",
+  "log2(NKX3-1 TPM + 1)",
+  "FOLH1 vs NKX3-1 expression",
+  "8b_TCGA-PRAD_FOLH1vsNKX3-1.pdf")
+
+## FOLH1 vs TMPRSS2 correlation
+stats_TMPRSS2 <- plot_correlation(
+  df,
+  "FOLH1",
+  "TMPRSS2",
+  "log2(FOLH1 TPM + 1)",
+  "log2(TMPRSS2 TPM + 1)",
+  "FOLH1 vs TMPRSS2 expression",
+  "8b_TCGA-PRAD_FOLH1vsTMPRSS2.pdf")
+
+## FOLH1 vs ERG expression
+stats_ERGexpr <- plot_correlation(
+  df,
+  "FOLH1",
+  "ERG",
+  "log2(FOLH1 TPM + 1)",
+  "log2(ERG TPM + 1)",
+  "FOLH1 vs ERG expression",
+  "8b_TCGA-PRAD_FOLH1vsERGexpression.pdf")
+
+## statistics (Benjamini-Hochberg correction)
+stats_all <- bind_rows(
+  stats_KLK3,
+  stats_FKBP5,
+  stats_NKX31,
+  stats_TMPRSS2,
+  stats_ERGexpr)
+stats_all$p_adj_BH <- p.adjust(
+  stats_all$p_value,
+  method = "BH")
+stats_all$BH_significance <- sapply(
+  stats_all$p_adj_BH,
+  sig_star)
+
+# summary
+wb <- createWorkbook()
+addWorksheet(wb, "QC")
+qc <- data.frame(
+  Object_class = prad_class,
+  Assays = assays_available,
+  Matrix_dimensions = assay_dim,
+  Expression_used = "tpm_unstrand (log2(TPM+1))")
+writeData(wb, "QC", qc)
+addWorksheet(wb, "Summary")
+writeData(wb, "Summary", stats_all)
+addWorksheet(wb, "FOLH1_vs_KLK3")
+writeData(wb, "FOLH1_vs_KLK3", stats_KLK3)
+addWorksheet(wb, "FOLH1_vs_FKBP5")
+writeData(wb, "FOLH1_vs_FKBP5", stats_FKBP5)
+addWorksheet(wb, "FOLH1_vs_NKX3-1")
+writeData(wb, "FOLH1_vs_NKX3-1", stats_NKX31)
+addWorksheet(wb, "FOLH1_vs_TMPRSS2")
+writeData(wb, "FOLH1_vs_TMPRSS2", stats_TMPRSS2)
+addWorksheet(wb, "FOLH1_vs_ERG_expr")
+writeData(wb, "FOLH1_vs_ERG_expr", stats_ERGexpr)
+saveWorkbook(wb,
+  file.path(out_dir,
+            "8b_TCGA-PRAD_PathwayAnalysis.xlsx"),
+  overwrite = TRUE)
+
+
+# IMMUNE SIGNATURE ANALYSIS in TCGA-PRAD
+
+## 1. SETUP
+base_dir <- "C:/Users/Martina/Desktop/TCGA"
+setwd(base_dir)
+out_dir <- file.path(base_dir, "results")
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+
+## 2. PACKAGES
+library(SummarizedExperiment)
+library(dplyr)
+library(ggplot2)
+library(openxlsx)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(pheatmap)
+library(sysfonts)
+library(showtext)
+font_add("Arial", "C:/Windows/Fonts/arial.ttf")
+showtext_auto()
+
+## 3. LOAD TCGA-PRAD 
+prad <- readRDS("TCGA_PRAD_clinical.rds")
+expr <- assay(prad)
+cd <- as.data.frame(colData(prad))
+rd <- as.data.frame(rowData(prad))
+
+## GENE ANNOTATION
+ens <- gsub("\\..*", "", rd$gene_id)
+symbols <- mapIds(
+  org.Hs.eg.db,
+  keys = ens,
+  column = "SYMBOL",
+  keytype = "ENSEMBL",
+  multiVals = "first"
+)
+rd$symbol <- symbols
+
+## 4. EXTRACT FOLH1 EXPRESSION 
+folh1_idx <- which(rd$symbol == "FOLH1")
+stopifnot(length(folh1_idx) > 0)
+folh1 <- as.numeric(
+  expr[folh1_idx[1], ]
+)
+
+## 5. IMMUNE GENE PANEL
+immune_sets <- list(
+  CD8_Tcells = c(
+    "CD8A","CD8B"
+  ),
+  Tcells = c(
+    "CD3D","CD3E","CD2"
+  ),
+  Cytotoxic = c(
+    "GZMB","PRF1","NKG7"
+  ),
+  Treg = c(
+    "FOXP3","IL2RA"
+  ),
+  Exhaustion = c(
+    "PDCD1","CTLA4","LAG3",
+    "TIGIT","HAVCR2"
+  ),
+  NK = c(
+    "NCR1","KLRD1","NKG7"
+  ),
+  Bcells = c(
+    "MS4A1","CD19","CD79A"
+  ),
+  Macrophage = c(
+    "CD68","CD163"
+  ),
+  M2 = c(
+    "CD163","MRC1"
+  ),
+  Dendritic = c(
+    "ITGAX","HLA-DRA"
+  )
+)
+get_gene <- function(gene){
+  idx <- which(rd$symbol == gene)
+  if(length(idx) == 0){
+    return(rep(NA_real_, ncol(expr)))
+  }
+  as.numeric(
+    expr[idx[1], ]
+  )
+}
+
+## BUILD SIGNATURE MATRIX IN PRIMARY TUMOURS WITH HIGH & LOW FOLH1
+signature_df <- data.frame(
+  sample = colnames(prad),
+  FOLH1 = folh1,
+  sample_type = cd$sample_type
+)
+for(sig in names(immune_sets)){
+  genes <- immune_sets[[sig]]
+  tmp <- sapply(
+    genes,
+    get_gene
+  )
+  if(is.vector(tmp)){
+    score <- tmp
+  } else {
+    score <- rowMeans(
+      tmp,
+      na.rm = TRUE
+    )
+  }
+  signature_df[[sig]] <- score
+}
+signature_df <- signature_df %>%
+  filter(
+    sample_type == "Primary Tumor"
+  )
+signature_df$logFOLH1 <- log2(
+  signature_df$FOLH1 + 1
+)
+signature_df$FOLH1_group <- ifelse(
+  signature_df$FOLH1 >= median(
+    signature_df$FOLH1,
+    na.rm = TRUE
+  ),
+  "High",
+  "Low"
+)
+signature_df$FOLH1_group <- factor(
+  signature_df$FOLH1_group,
+  levels = c("Low","High")
+)
+
+## CORRELATIONS IN HIGH vs LOW FOLH1
+cor_results <- data.frame()
+for(sig in names(immune_sets)){
+  test <- cor.test(
+    signature_df$FOLH1,
+    signature_df[[sig]],
+    method = "spearman"
+  )
+  cor_results <- rbind(
+    cor_results,
+    data.frame(
+      Signature = sig,
+      rho = unname(test$estimate),
+      p_value = test$p.value
+    )
+  )
+}
+cor_results$FDR <- p.adjust(
+  cor_results$p_value,
+  method = "BH"
+)
+cor_results$significance <- case_when(
+  cor_results$FDR < 0.0001 ~ "****",
+  cor_results$FDR < 0.001 ~ "***",
+  cor_results$FDR < 0.01 ~ "**",
+  cor_results$FDR < 0.05 ~ "*",
+  TRUE ~ "ns"
+)
+cor_results$direction <- case_when(
+  cor_results$rho > 0 ~ "Positive",
+  cor_results$rho < 0 ~ "Negative",
+  TRUE ~ "None"
+)
+cor_results <- cor_results %>%
+  arrange(desc(abs(rho)))
+group_results <- data.frame()
+for(sig in names(immune_sets)){
+  test <- wilcox.test(
+    signature_df[[sig]] ~
+      signature_df$FOLH1_group
+  )
+  group_results <- rbind(
+    group_results,
+    data.frame(
+      Signature = sig,
+      p_value = test$p.value
+    )
+  )
+}
+group_results$FDR <- p.adjust(
+  group_results$p_value,
+  method = "BH"
+)
+group_results$significance <- case_when(
+  group_results$FDR < 0.0001 ~ "****",
+  group_results$FDR < 0.001 ~ "***",
+  group_results$FDR < 0.01 ~ "**",
+  group_results$FDR < 0.05 ~ "*",
+  TRUE ~ "ns"
+)
+
+## HEATMAP
+heatmap_mat <- as.matrix(
+  signature_df[, names(immune_sets)]
+)
+rownames(heatmap_mat) <- signature_df$sample
+heatmap_mat <- scale(
+  heatmap_mat
+)
+pdf(
+  file.path(
+    out_dir,
+    "FOLH1_ImmuneSignatures_Heatmap.pdf"
+  ),
+  width = 8,
+  height = 5
+)
+pheatmap(
+  t(heatmap_mat),
+  cluster_rows = TRUE,
+  cluster_cols = TRUE,
+  show_colnames = FALSE,
+  main = "Immune signatures in TCGA-PRAD"
+)
+dev.off()
+
+## PLOT
+cor_results[, c(
+  "Signature",
+  "rho",
+  "p_value",
+  "FDR",
+  "significance"
+)]
+cor_results <- cor_results %>%
+  arrange(desc(rho))
+cor_results$Signature <- factor(
+  cor_results$Signature,
+  levels = cor_results$Signature
+)
+cor_results$label_y <- ifelse(
+  cor_results$rho >= 0,
+  cor_results$rho + 0.035,
+  cor_results$rho - 0.035
+)
+cor_results$vjust <- ifelse(
+  cor_results$rho >= 0,
+  0,
+  1
+)
+p <- ggplot(
+  cor_results,
+  aes(
+    x = Signature,
+    y = rho,
+    fill = rho
+  )
+) +
+  geom_col(
+    width = 0.75,
+    colour = "black",
+    linewidth = 0.25
+  ) +
+  geom_hline(
+    yintercept = 0,
+    colour = "black",
+    linewidth = 0.4
+  ) +
+  geom_text(
+    aes(
+      y = label_y,
+      label = significance,
+      vjust = vjust
+    ),
+    family = "Arial",
+    size = 4.5
+  ) +
+  scale_fill_gradient2(
+    low = "#3B6FB6",
+    mid = "white",
+    high = "#B22222",
+    midpoint = 0,
+    limits = c(
+      min(cor_results$rho),
+      max(cor_results$rho)
+    )
+  ) +
+  coord_cartesian(
+    ylim = c(
+      min(cor_results$rho) - 0.12,
+      max(cor_results$rho) + 0.12
+    ),
+    clip = "off"
+  ) +
+  theme_classic(base_size = 16) +
+  theme(
+    text = element_text(
+      family = "Arial",
+      colour = "black"
+    ),
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1,
+      vjust = 1
+    ),
+    axis.line = element_line(
+      linewidth = 0.6
+    ),
+    axis.ticks = element_line(
+      linewidth = 0.5
+    ),
+    plot.title = element_text(
+      face = "bold",
+      size = 16
+    ),
+    plot.subtitle = element_text(
+      size = 12
+    ),
+    legend.position = "none",
+    plot.margin = margin(
+      15,
+      15,
+      25,
+      15
+    )
+  ) +
+  labs(
+    title = "Association of FOLH1 with immune signatures",
+    subtitle = "Spearman correlation across TCGA-PRAD primary tumors",
+    x = NULL,
+    y = "Spearman correlation coefficient (ρ)"
+  )
+print(p)
+ggsave(
+  file.path(
+    out_dir,
+    "FOLH1_ImmuneSignatures_Barplot.pdf"
+  ),
+  p,
+  width = 8,
+  height = 5,
+  dpi = 600
+)
+wb <- createWorkbook()
+addWorksheet(wb,"Correlations")
+writeData(
+  wb,
+  "Correlations",
+  cor_results
+)
+addWorksheet(wb,"High_vs_Low")
+writeData(
+  wb,
+  "High_vs_Low",
+  group_results
+)
+addWorksheet(wb,"Summary")
+writeData(
+  wb,
+  "Summary",
+  data.frame(
+    n_patients = nrow(signature_df),
+    median_FOLH1 = median(signature_df$FOLH1)
+  )
+)
+saveWorkbook(
+  wb,
+  file.path(
+    out_dir,
+    "FOLH1_ImmuneSignatures_PRAD.xlsx"
+  ),
+  overwrite = TRUE
+)
+
+# Difference in immune gene programs activity in relation to FOLH1 expression in TCGA-PRAD: Which immune programs are different between FOLH1-high and FOLH1-low prostate tumors?
+
+## setup
+base_dir <- "C:/Users/Martina/Desktop/TCGA"
+setwd(base_dir)
+out_dir <- file.path(base_dir, "results")
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+
+## packages
+library(SummarizedExperiment)
+library(dplyr)
+library(ggplot2)
+library(openxlsx)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(pheatmap)
+library(sysfonts)
+
+## load TCGA-PRAD 
+prad <- readRDS("TCGA_PRAD_clinical.rds")
+expr <- assay(prad)
+cd <- as.data.frame(colData(prad))
+rd <- as.data.frame(rowData(prad))
+
+## gene annotation
+ens <- gsub("\\..*", "", rd$gene_id)
+rd$symbol <- mapIds(
+  org.Hs.eg.db,
+  keys = ens,
+  column = "SYMBOL",
+  keytype = "ENSEMBL",
+  multiVals = "first")
+rowData(prad)$symbol <- rd$symbol
+
+## extract FOLH1 expression 
+folh1_idx <- which(rd$symbol == "FOLH1")
+stopifnot(length(folh1_idx) > 0)
+folh1 <- as.numeric(expr[folh1_idx[1], ])
+
+## immune programs
+immune_programs <- list(
+  CD8_T = c("CD8A","CD8B","CD3D","CD3E"),
+  Cytotoxic = c("GZMB","PRF1","NKG7"),
+  Treg = c("FOXP3","IL2RA"),
+  Exhaustion = c("PDCD1","CTLA4","LAG3","TIGIT"),
+  NK = c("NCR1","KLRD1"),
+  Bcell = c("MS4A1","CD19"),
+  Myeloid = c("CD68","CD163","MRC1"),
+  DC = c("ITGAX","HLA-DRA"))
+
+## gene extraction
+get_program_score <- function(genes) {
+  vals <- sapply(genes, function(g) {
+    idx <- which(rd$symbol == g)
+    if (length(idx) == 0) return(rep(NA_real_, ncol(expr)))
+    as.numeric(expr[idx[1], ])})
+  vals <- as.matrix(vals)
+  if (ncol(vals) == 1) {
+    return(vals[,1])} else {
+    return(rowMeans(vals, na.rm = TRUE))}}
+program_mat <- as.data.frame(sapply(immune_programs, get_program_score))
+
+## build dataframe
+df <- data.frame(
+  sample = colnames(expr),
+  FOLH1 = as.numeric(folh1),
+  program_mat,
+  sample_type = cd$sample_type)
+df <- df %>%
+  filter(sample_type == "Primary Tumor") %>%
+  na.omit()
+df$logFOLH1 <- log2(df$FOLH1 + 1)
+
+## FOLH1 groups
+df$FOLH1_group <- ifelse(
+  df$logFOLH1 >= median(df$logFOLH1, na.rm = TRUE),"High","Low")
+df$FOLH1_group <- factor(df$FOLH1_group,levels = c("Low", "High"))
+
+## statistics
+group_results <- lapply(names(immune_programs), function(p) {
+  low_vals  <- df[df$FOLH1_group == "Low", p]
+  high_vals <- df[df$FOLH1_group == "High", p]
+  test <- wilcox.test(low_vals, high_vals, exact = FALSE)
+  data.frame(
+    Program = p,
+    median_low = median(low_vals, na.rm = TRUE),
+    median_high = median(high_vals, na.rm = TRUE),
+    delta = median(high_vals, na.rm = TRUE) - median(low_vals, na.rm = TRUE),
+    p_value = test$p.value)}) %>% bind_rows()
+group_results$FDR <- p.adjust(group_results$p_value, "BH")
+group_results$significance <- case_when(
+  group_results$FDR < 0.001 ~ "***",
+  group_results$FDR < 0.01 ~ "**",
+  group_results$FDR < 0.05 ~ "*",
+  TRUE ~ "ns")
+group_results$direction <- ifelse(
+  group_results$delta > 0,
+  "Higher in FOLH1-high",
+  "Higher in FOLH1-low")
+pad <- max(abs(group_results$delta), na.rm = TRUE) * 0.08
+group_results$label <- ifelse(
+  group_results$FDR < 0.05,
+  group_results$significance,"")
+
+## plot
+group_results <- group_results %>%
+  arrange(FDR, desc(abs(delta)))
+group_results$Program <- factor(group_results$Program, levels = group_results$Program)
+p <- ggplot(group_results, aes(x = Program, y = delta, fill = delta)) +
+  geom_col(width = 0.7, color = "black", linewidth = 0.25) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.5) +
+  geom_text(
+    aes(
+      label = label,
+      y = delta + ifelse(delta >= 0, pad, -pad)),
+    family = "Arial",
+    fontface = "bold",
+    size = 4) +
+  scale_fill_gradient2(
+    low = "#2166AC",
+    mid = "white",
+    high = "#B2182B",
+    midpoint = 0,
+    name = "Δ median\n(High - Low)") +
+  theme_classic(base_size = 14) +
+  theme(
+    text = element_text(family="Arial"),
+    axis.text.y = element_text(size=12),
+    axis.text.x = element_text(size=11),
+    axis.title = element_text(face="bold", size=13),
+    plot.title = element_text(face="bold", size=15),
+    plot.subtitle = element_text(size=12),
+    legend.title = element_text(face="bold"),
+    legend.position="right",
+    plot.margin = margin(10, 25, 10, 10)) +
+  coord_flip(
+    clip = "off") +
+  scale_y_continuous(
+    expand = expansion(mult = c(0.05,0.15))) +
+  labs(
+    title = "Tumor-intrinsic immune programs differ by FOLH1 expression",
+    subtitle = "TCGA-PRAD primary tumors",
+    x = NULL,
+    y = "Δ median program score")
+print(p)
+ggsave(file.path(out_dir, "9_TCGA-PRAD_ImmunePrograms.pdf"), p, width = 7, height = 5, dpi = 600)
+
+## summary
+wb <- createWorkbook()
+addWorksheet(wb, "Group_Comparison")
+writeData(wb, "Group_Comparison", group_results)
+addWorksheet(wb, "Summary")
+writeData(wb, "Summary", data.frame(
+  n_samples = nrow(df),
+  n_programs = length(immune_programs),
+  median_FOLH1 = median(df$FOLH1)))
+saveWorkbook(
+  wb,
+  file.path(out_dir, "9_TCGA-PRAD_ImmunePrograms.xlsx"),
+  overwrite = TRUE)
+
+# immune cell biomarkers analysis in TCGA-PRAD:Is FOLH1 expression associated with immune microenvironment markers in primary TCGA-PRAD?
+
+## setup
+base_dir <- "C:/Users/Martina/Desktop/TCGA"
+setwd(base_dir)
+out_dir <- file.path(base_dir, "results")
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+
+## packages
+library(SummarizedExperiment)
+library(dplyr)
+library(ggplot2)
+library(openxlsx)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(pheatmap)
+font_add("Arial", "C:/Windows/Fonts/arial.ttf")
+showtext_auto()
+
+## TCGA-PRAD 
+prad <- readRDS("TCGA_PRAD_clinical.rds")
+se <- prad
+expr <- assay(se)
+cd <- as.data.frame(colData(se))
+rd <- as.data.frame(rowData(se))
+
+## gene annotation
+ens <- gsub("\\..*", "", rd$gene_id)
+symbols <- mapIds(
+  org.Hs.eg.db,
+  keys = ens,
+  column = "SYMBOL",
+  keytype = "ENSEMBL",
+  multiVals = "first")
+rd$symbol <- symbols
+rowData(se)$symbol <- symbols
+
+## extract FOLH1 expression
+folh1_idx <- which(rd$symbol == "FOLH1")
+stopifnot(length(folh1_idx) > 0)
+folh1 <- as.numeric(expr[folh1_idx[1], ])
+
+## immune gene panels
+immune_genes <- c(
+  "CD8A","CD8B",
+  "CD3D","CD3E",
+  "GZMB","PRF1",
+  "FOXP3","IL2RA",
+  "PDCD1","CTLA4","LAG3","TIGIT",
+  "CD68","CD163","MRC1",
+  "ITGAX","HLA-DRA",
+  "NCR1","KLRD1",
+  "MS4A1","CD19")
+
+## gene vector
+immune_mat <- sapply(immune_genes, function(gene) {
+  idx <- which(rd$symbol == gene)
+  if (length(idx) == 0) {
+    return(rep(NA_real_, ncol(expr)))}
+  as.numeric(expr[idx[1], ])})
+immune_mat <- apply(immune_mat, 2, as.numeric)
+colnames(immune_mat) <- immune_genes
+
+## dataframe
+df <- data.frame(
+  sample = colnames(se),
+  FOLH1 = as.numeric(folh1),
+  immune_mat,
+  sample_type = cd$sample_type,
+  project = cd$project_id,
+  check.names = FALSE)
+df <- df %>%
+  filter(sample_type == "Primary Tumor") %>%
+  na.omit()
+df$logFOLH1 <- log2(df$FOLH1 + 1)
+
+## high vs low FOLH1 groups
+df$FOLH1_group <- ifelse(
+  df$FOLH1 >= median(df$FOLH1, na.rm = TRUE),
+  "High",
+  "Low")
+df$FOLH1_group <- factor(df$FOLH1_group, levels = c("Low", "High"))
+
+## correlation analysis (Spearman)
+cor_results <- data.frame()
+for (g in immune_genes) {
+  x <- as.numeric(df$FOLH1)
+  y <- as.numeric(df[[g]])
+  ok <- complete.cases(x, y)
+  if (sum(ok) < 10) next
+  test <- cor.test(x[ok], y[ok], method = "spearman")
+  cor_results <- rbind(cor_results, data.frame(
+    gene = g,
+    rho = as.numeric(test$estimate),
+    p_value = test$p.value))}
+cor_results$adj_p <- p.adjust(cor_results$p_value, method = "BH")
+cor_results <- cor_results[order(abs(cor_results$rho), decreasing = TRUE), ]
+print(head(cor_results, 10))
+
+## high vs low immune comparison
+group_results <- data.frame()
+for (g in immune_genes) {
+  test <- wilcox.test(df[[g]] ~ df$FOLH1_group)
+  group_results <- rbind(group_results, data.frame(
+    gene = g,
+    p_value = test$p.value,
+    significance = ifelse(
+      test$p.value < 0.0001, "****",
+      ifelse(test$p.value < 0.001, "***",
+             ifelse(test$p.value < 0.01, "**",
+                    ifelse(test$p.value < 0.05, "*", "ns"))))))}
+
+## heatmap
+heatmap_mat <- as.matrix(df[, immune_genes])
+rownames(heatmap_mat) <- df$sample
+heatmap_mat <- scale(heatmap_mat)
+annotation <- data.frame(FOLH1_group = df$FOLH1_group)
+rownames(annotation) <- df$sample
+pdf(file.path(out_dir, "FOLH1_ImmuneAnalysis_Heatmap.pdf"), width = 8, height = 6)
+pheatmap(
+  t(heatmap_mat),
+  annotation_col = annotation,
+  show_colnames = FALSE,
+  main = "FOLH1 vs Immune Microenvironment (PRAD)")
+dev.off()
+print(head(cor_results, 10))
+
+## summary
+wb <- createWorkbook()
+addWorksheet(wb, "Correlation")
+writeData(wb, "Correlation", cor_results)
+addWorksheet(wb, "Group_Comparison")
+writeData(wb, "Group_Comparison", group_results)
+addWorksheet(wb, "Summary")
+writeData(wb, "Summary", data.frame(
+  n_samples = nrow(df),
+  n_genes = length(immune_genes),
+  median_FOLH1 = median(df$FOLH1)))
+saveWorkbook(
+  wb,
+  file.path(out_dir, "FOLH1_ImmuneAnalysis_PRAD.xlsx"),
+  overwrite = TRUE)
+
+# FOLH1 IMMUNE PHENOTYPE (TUMOUR MICROENVIRONMENT) ANALYSIS in TCGA-PRAD: Do PSMA-high (FOLH1-high) prostate tumours differ in immune phenotype from PSMA-low tumours?
+
+## set
+base_dir <- "C:/Users/Martina/Desktop/TCGA"
+setwd(base_dir)
+out_dir <- file.path(base_dir, "results")
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+
+## packages
+library(SummarizedExperiment)
+library(DESeq2)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(openxlsx)
+library(pheatmap)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(showtext)
+font_add("Arial", "C:/Windows/Fonts/arial.ttf")
+showtext_auto()
+
+## theme
+theme_set(
+  theme_bw(base_size = 16) +
+    theme(
+      text = element_text(family = "Arial"),
+      panel.grid.major = element_line(linewidth = 0.3),
+      panel.grid.minor = element_blank()
+    )
+)
+
+## load data
+prad <- readRDS("TCGA_PRAD_clinical.rds")
+cd <- as.data.frame(colData(prad))
+rd <- as.data.frame(rowData(prad))
+
+## normalization
+dds <- DESeqDataSetFromMatrix(
+  countData = assay(prad),
+  colData = colData(prad),
+  design = ~ 1
+)
+dds <- estimateSizeFactors(dds)
+vsd <- varianceStabilizingTransformation(
+  dds,
+  blind = TRUE
+)
+expr_norm <- assay(vsd)
+
+## gene annotation
+ens <- gsub("\\..*", "", rd$gene_id)
+symbols <- mapIds(
+  org.Hs.eg.db,
+  keys = ens,
+  column = "SYMBOL",
+  keytype = "ENSEMBL",
+  multiVals = "first"
+)
+rd$symbol <- symbols
+
+## primary tumours only
+print(table(cd$sample_type))
+primary_idx <- which(cd$sample_type == "Primary Tumor")
+if(length(primary_idx) == 0){
+  stop("No Primary Tumor samples found.")
+}
+expr_norm_tumor <- expr_norm[, primary_idx]
+cd_tumor <- cd[primary_idx, ]
+
+## FOLH1 expression
+folh1_idx <- which(rd$symbol == "FOLH1")
+if(length(folh1_idx) == 0){
+  stop("FOLH1 not found.")
+}
+folh1 <- as.numeric(
+  expr_norm_tumor[folh1_idx[1], ]
+)
+
+# dataframe
+df <- data.frame(
+  sample = colnames(expr_norm_tumor),
+  FOLH1 = folh1,
+  sample_type = cd_tumor$sample_type,
+  stringsAsFactors = FALSE)
+
+# immune signatures
+signature_list <- list(
+  Cytotoxic_T = c(
+    "CD8A","CD8B","GZMB","PRF1"
+  ),
+  Treg = c(
+    "FOXP3","IL2RA"
+  ),
+  Exhausted_T = c(
+    "PDCD1","CTLA4","LAG3","TIGIT"
+  ),
+  M2_Macrophage = c(
+    "CD68","CD163","MRC1"
+  ),
+  APC_DC = c(
+    "ITGAX","HLA-DRA"
+  )
+)
+
+# signature scores
+for(sig in names(signature_list)) {
+  genes <- signature_list[[sig]]
+  present <- unique(
+    genes[genes %in% rd$symbol]
+  )
+  if(length(present) == 0){
+    df[[sig]] <- NA
+  } else {
+    gene_scores <- sapply(
+      present,
+      function(g){
+        idx <- which(rd$symbol == g)
+        if(length(idx) == 1){
+          expr_norm_tumor[idx, ]
+        } else {
+          colMeans(
+            expr_norm_tumor[idx, , drop = FALSE],
+            na.rm = TRUE
+          )
+        }
+      }
+    )
+    gene_scores <- t(as.matrix(gene_scores))
+    df[[sig]] <- colMeans(
+      gene_scores,
+      na.rm = TRUE
+    )
+  }
+}
+
+# median split
+median_folh1 <- median(
+  df$FOLH1,
+  na.rm = TRUE
+)
+df$FOLH1_group <- ifelse(
+  df$FOLH1 >= median_folh1,
+  "High",
+  "Low"
+)
+df$FOLH1_group <- factor(
+  df$FOLH1_group,
+  levels = c("Low","High")
+)
+
+# group comparison
+immune_stats <- data.frame()
+for(sig in names(signature_list)) {
+  if(all(is.na(df[[sig]]))) next
+  w <- wilcox.test(
+    df[[sig]] ~ df$FOLH1_group
+  )
+  low_med <- median(
+    df[df$FOLH1_group == "Low", sig],
+    na.rm = TRUE
+  )
+  high_med <- median(
+    df[df$FOLH1_group == "High", sig],
+    na.rm = TRUE
+  )
+  immune_stats <- rbind(
+    immune_stats,
+    data.frame(
+      Signature = sig,
+      Low_Median = low_med,
+      High_Median = high_med,
+      Difference = high_med - low_med,
+      Percent_Difference =
+        ifelse(
+          abs(low_med) > 1e-6,
+          ((high_med - low_med) /
+             abs(low_med)) * 100,
+          NA
+        ),
+      p_value = w$p.value
+    )
+  )
+}
+immune_stats$FDR <- p.adjust(
+  immune_stats$p_value,
+  method = "BH"
+)
+immune_stats$Significance <- ifelse(
+  immune_stats$FDR < 1e-4, "****",
+  ifelse(
+    immune_stats$FDR < 1e-3, "***",
+    ifelse(
+      immune_stats$FDR < 1e-2, "**",
+      ifelse(
+        immune_stats$FDR < 0.05,
+        "*",
+        "ns"
+      )
+    )
+  )
+)
+immune_stats <- immune_stats %>%
+  arrange(FDR)
+print(immune_stats)
+
+## correlations
+cor_results <- data.frame()
+for(sig in names(signature_list)) {
+  if(all(is.na(df[[sig]]))) next
+  ct <- cor.test(
+    df$FOLH1,
+    df[[sig]],
+    method = "spearman",
+    exact = FALSE
+  )
+  cor_results <- rbind(
+    cor_results,
+    data.frame(
+      Signature = sig,
+      rho = as.numeric(ct$estimate),
+      p_value = ct$p.value
+    )
+  )
+}
+cor_results$FDR <- p.adjust(
+  cor_results$p_value,
+  method = "BH"
+)
+cor_results$Significance <- ifelse(
+  cor_results$FDR < 1e-4, "****",
+  ifelse(
+    cor_results$FDR < 1e-3, "***",
+    ifelse(
+      cor_results$FDR < 1e-2, "**",
+      ifelse(
+        cor_results$FDR < 0.05,
+        "*",
+        "ns"
+      )
+    )
+  )
+)
+cor_results$Direction <- ifelse(
+  cor_results$rho > 0,
+  "Positive",
+  "Negative"
+)
+cor_results$Heatmap_Label <- paste0(
+  sprintf("%.2f", cor_results$rho),
+  " ",
+  cor_results$Significance
+)
+
+# heatmap
+heat <- matrix(
+  cor_results$rho,
+  nrow = 1,
+  dimnames = list(
+    "FOLH1",
+    cor_results$Signature
+  )
+)
+display_mat <- matrix(
+  paste0(
+    sprintf("%.2f", cor_results$rho),
+    "\n",
+    cor_results$Significance
+  ),
+  nrow = 1,
+  dimnames = list(
+    "FOLH1",
+    cor_results$Signature
+  )
+)
+showtext_auto(FALSE)
+pdf(
+  file.path(
+    out_dir,
+    "FOLH1_Immune_Heatmap.pdf"
+  ),
+  width = 9,
+  height = 3
+)
+pheatmap(
+  heat,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  display_numbers = display_mat,
+  fontsize = 14,
+  fontsize_number = 14,
+  number_color = "black",
+  border_color = "grey70",
+  color = colorRampPalette(
+    c("navy","white","firebrick3")
+  )(100),
+  breaks = seq(-1,1,length.out = 101),
+  angle_col = 0,
+  main = "Correlation of FOLH1 with immune signatures"
+)
+dev.off()
+showtext_auto(TRUE)
+
+# boxplots
+plot_df <- df %>%
+  select(
+    FOLH1_group,
+    all_of(names(signature_list))
+  ) %>%
+  pivot_longer(
+    cols = -FOLH1_group,
+    names_to = "Signature",
+    values_to = "Score"
+  )
+sig_labels <- immune_stats %>%
+  select(
+    Signature,
+    Significance,
+    FDR
+  )
+sig_labels$label <- paste0(
+  sig_labels$Significance,
+  "\nFDR=",
+  formatC(
+    sig_labels$FDR,
+    format = "e",
+    digits = 2
+  )
+)
+ypos <- plot_df %>%
+  group_by(Signature) %>%
+  summarise(
+    y = max(Score, na.rm = TRUE) * 1.18,
+    .groups = "drop"
+  )
+sig_labels <- left_join(
+  sig_labels,
+  ypos,
+  by = "Signature"
+)
+sig_labels$x <- 1.5
+p <- ggplot(
+  plot_df,
+  aes(
+    FOLH1_group,
+    Score,
+    fill = FOLH1_group
+  )
+) +
+  geom_boxplot(
+    width = 0.6,
+    outlier.shape = NA
+  ) +
+  geom_jitter(
+    width = 0.12,
+    alpha = 0.35,
+    size = 0.7
+  ) +
+  geom_text(
+    data = sig_labels,
+    aes(
+      x = x,
+      y = y,
+      label = label
+    ),
+    inherit.aes = FALSE,
+    size = 6
+  ) +
+  facet_wrap(
+    ~ Signature,
+    scales = "free_y"
+  ) +
+  scale_fill_manual(
+    values = c(
+      Low = "grey70",
+      High = "red3"
+    )
+  ) +
+  theme_bw(base_size = 16) +
+  theme(
+    legend.position = "none",
+    strip.background = element_blank()
+  ) +
+  labs(
+    title = "Immune phenotype of PSMA-high prostate tumours",
+    subtitle = "Wilcoxon test with BH correction",
+    x = "",
+    y = "Immune signature score"
+  )
+ggsave(
+  file.path(
+    out_dir,
+    "FOLH1_ImmunePhenotype.pdf"
+  ),
+  p,
+  width = 12,
+  height = 7
+)
+
+## excel output
+group_counts <- data.frame(
+  Group = names(
+    table(df$FOLH1_group)
+  ),
+  Count = as.numeric(
+    table(df$FOLH1_group)
+  )
+)
+wb <- createWorkbook()
+addWorksheet(
+  wb,
+  "Immune_Signatures"
+)
+writeData(
+  wb,
+  "Immune_Signatures",
+  immune_stats
+)
+addWorksheet(
+  wb,
+  "Correlations"
+)
+writeData(
+  wb,
+  "Correlations",
+  cor_results
+)
+addWorksheet(
+  wb,
+  "Group_Counts"
+)
+writeData(
+  wb,
+  "Group_Counts",
+  group_counts
+)
+saveWorkbook(
+  wb,
+  file.path(
+    out_dir,
+    "FOLH1_ImmunePhenotype_PRAD.xlsx"
+  ),
+  overwrite = TRUE
+)
+# MCPcounter in TCGA-PRAD: How does the tumour microenvironment composition (immune + stromal) in prostate cancer relate to tumour aggressiveness and FOLH1 expression? 
+
+## set
+base_dir <- "C:/Users/Martina/Desktop/TCGA"
+out_dir <- file.path(base_dir, "results")
+dir.create(out_dir,showWarnings = FALSE, recursive = TRUE)
+
+## packages
+library(SummarizedExperiment)
+library(immunedeconv)
+library(dplyr)
+library(ggpubr)
+library(ggplot2)
+library(limma)
+library(pheatmap)
+library(openxlsx)
+library(RColorBrewer)
+
+## load & check raw data
+rds_file <- file.path(base_dir, "TCGA_PRAD_clinical.rds")
+prad <- readRDS(rds_file)
+class(prad)
+dim(prad)
+table(colData(prad)$sample_type)
+assayNames(prad)
+summary(assay(prad, "fpkm_uq_unstrand")[,1])
+
+## verify FOLH1 presence
+rd <- as.data.frame(rowData(prad))
+rd$symbol <- rd$gene_name
+which(rd$symbol == "FOLH1")
+sum(rd$symbol == "FOLH1", na.rm = TRUE)
+
+## extract & clean expression matrix
+expr <- assay(prad, "fpkm_uq_unstrand")
+genes <- rowData(prad)$gene_name
+rownames(expr) <- genes
+expr <- expr[rownames(expr) != "", ]
+expr <- expr[!is.na(rownames(expr)), ]
+expr <- expr[!duplicated(rownames(expr)), ]
+expr <- as.matrix(expr)
+storage.mode(expr) <- "double"
+sample_info <- as.data.frame(colData(prad), stringsAsFactors = FALSE)
+gene_info <- as.data.frame(rowData(prad))
+sample_info <- data.frame(lapply(sample_info, function(x) {
+  if (is.list(x)) {
+    return(as.character(x))
+  } else {
+    return(x)
+  }
+}), check.names = FALSE)
+
+## MCP counter: tumour microenvironment of TCG-PRAD
+result <- deconvolute(expr, method = "mcp_counter")
+result_df <- as.data.frame(result)
+rownames(result_df) <- result_df$cell_type
+result_df$cell_type <- NULL
+result_mat <- as.matrix(result_df)
+storage.mode(result_mat) <- "double"
+print(class(result_mat))
+print(dim(result_mat))
+print(rownames(result_mat))
+any(is.na(result_mat))
+any(is.infinite(result_mat))
+qc_expr_head <- head(expr[,1:5])
+qc_expr_rows <- head(rownames(expr))
+qc_result_head <- head(result_mat)
+qc_result_rows <- rownames(result_mat)
+qc_sample_info <- head(sample_info)
+
+# heatmap
+result_mat <- result_mat[order(rownames(result_mat)), ]
+my_colors <- colorRampPalette(rev(brewer.pal(11, "RdBu")))(100)
+pdf(
+  file.path(out_dir, "12_TCGA-PRAD_MCPcounter_PRAD_heatmap.pdf"),
+  width = 18,
+  height = 14,
+  useDingbats = FALSE)
+pheatmap(
+  result_mat,
+  scale = "row",
+  clustering_distance_rows = "correlation",
+  clustering_distance_cols = "euclidean",
+  clustering_method = "complete",
+  color = my_colors,
+  border_color = NA,
+  show_colnames = FALSE,
+  fontsize_row = 10,
+  fontsize = 12,
+  angle_col = 45,
+  treeheight_row = 20,
+  treeheight_col = 25,
+  main = "Tumor Microenvironment Landscape in TCGA-PRAD (MCP-counter)")
+dev.off()
+
+# barplot
+mean_scores <- rowMeans(result_mat)
+bar_df <- data.frame(
+  CellType = names(mean_scores),
+  MeanScore = mean_scores)
+pdf(file.path(out_dir, "12_TCGA-PRAD_MCPcounter_PRAD_barplot.pdf"),
+    width = 9,
+    height = 5)
+ggplot(bar_df, aes(x = reorder(CellType, MeanScore), y = MeanScore)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  theme_classic(base_size = 14) +
+  labs(
+    title = "Average Immune Infiltration in TCGA-PRAD",
+    x = "",
+    y = "MCP-counter Score")
+dev.off()
+
+# summary
+mcp_export <- data.frame(
+  CellType = rownames(result_mat),
+  result_mat,
+  check.names = FALSE)
+wb <- createWorkbook()
+addWorksheet(wb, "SampleInfo")
+writeData(wb, "SampleInfo", sample_info)
+addWorksheet(wb, "GeneInfo")
+writeData(wb, "GeneInfo", gene_info)
+addWorksheet(wb, "Expr_Head")
+writeData(wb, "Expr_Head", qc_expr_head)
+addWorksheet(wb, "Expr_Rownames")
+writeData(wb, "Expr_Rownames", data.frame(Gene = qc_expr_rows))
+addWorksheet(wb, "MCP_Result")
+writeData(wb, "MCP_Result", mcp_export)
+addWorksheet(wb, "MCP_Rownames")
+writeData(wb, "MCP_Rownames", data.frame(CellTypes = qc_result_rows))
+saveWorkbook(
+  wb,
+  file.path(out_dir, "12_TCGA-PRAD_MCPcounter_PRAD_summary.xlsx"),
+  overwrite = TRUE)
+write.csv(
+  mcp_export,
+  file.path(out_dir, "12_TCGA-PRAD_MCPcounter_PRAD_scores.csv"),
+  row.names = FALSE)
+
+## MCP counter: tumor microenvironment of PRAD vs Normal
+# group
+group <- sample_info$sample_type
+names(group) <- sample_info$barcode
+group2 <- group[colnames(result_mat)]
+table(group2, useNA = "ifany")
+keep <- group2 %in% c("Primary Tumor", "Solid Tissue Normal")
+result_mat2 <- result_mat[, keep]
+group2 <- group2[keep]
+group2 <- droplevels(factor(group2))
+table(group2)
+stopifnot(length(unique(group2)) == 2)
+
+# statistics (Wilcoxon)
+stats_df <- do.call(rbind, lapply(rownames(result_mat2), function(cell) {
+  x <- result_mat2[cell, ]
+  p <- wilcox.test(x ~ group2)$p.value
+  data.frame(
+    CellType = cell,
+    p.value = p,
+    Tumor_mean = mean(x[group2 == "Primary Tumor"], na.rm = TRUE),
+    Normal_mean = mean(x[group2 == "Solid Tissue Normal"], na.rm = TRUE))}))
+
+# FDR correction
+stats_df$FDR <- p.adjust(stats_df$p.value, method = "fdr")
+
+# direction
+stats_df$Direction <- ifelse(
+  stats_df$Tumor_mean > stats_df$Normal_mean,
+  "Enriched in Tumor",
+  "Enriched in Normal")
+
+# significance
+stats_df$Significance <- case_when(
+  stats_df$FDR < 0.001 ~ "***",
+  stats_df$FDR < 0.01  ~ "**",
+  stats_df$FDR < 0.05  ~ "*",
+  TRUE ~ "ns")
+stats_df <- stats_df[order(stats_df$FDR), ]
+sig_df <- subset(stats_df, FDR < 0.05)
+sig_strict <- subset(stats_df, FDR < 0.01)
+
+# barplot
+stats_df$CellType <- factor(stats_df$CellType, levels = stats_df$CellType)
+pdf(file.path(out_dir, "12_TCGA-PRAD_MCPcounter_TumorvsNormal_barplot.pdf"),
+    width = 10, height = 7)
+ggplot(stats_df, aes(x = CellType, y = -log10(FDR), fill = Direction)) +
+  geom_col() +
+  coord_flip() +
+  scale_fill_manual(values = c(
+    "Enriched in Tumor" = "#D73027",
+    "Enriched in Normal" = "#4575B4")) +
+  theme_classic(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.margin = margin(10, 15, 10, 15)) +
+  labs(
+    title = "TCGA-PRAD MCP-counter\nTumor vs Normal Immune Infiltration",
+    x = "",
+    y = "-log10(FDR)")
+dev.off()
+
+# summary
+wb <- createWorkbook()
+addWorksheet(wb, "Stats_Full")
+writeData(wb, "Stats_Full", stats_df)
+addWorksheet(wb, "Sig_FDR_0.05")
+writeData(wb, "Sig_FDR_0.05", sig_df)
+addWorksheet(wb, "Sig_FDR_0.01")
+writeData(wb, "Sig_FDR_0.01", sig_strict)
+mcp_export <- data.frame(
+  CellType = rownames(result_mat2),
+  result_mat2,
+  check.names = FALSE)
+addWorksheet(wb, "MCP_Scores")
+writeData(wb, "MCP_Scores", mcp_export)
+addWorksheet(wb, "Sample_Group")
+writeData(wb, "Sample_Group",
+          data.frame(Sample = names(group2), Group = group2))
+addWorksheet(wb, "QC")
+writeData(wb, "QC", data.frame(
+  n_tumor = sum(group2 == "Primary Tumor"),
+  n_normal = sum(group2 == "Solid Tissue Normal"),
+  n_samples = length(group2),
+  n_cell_types = nrow(result_mat2)))
+saveWorkbook(
+  wb,
+  file.path(out_dir, "12_TCGA-PRAD_MCPcounter_TumorvsNormal_summary.xlsx"),
+  overwrite = TRUE)
+
+## FOLH1 vs MCP-counter
+folh1 <- expr["FOLH1", ]
+cor_folh1 <- lapply(rownames(result_mat), function(ct){
+  ct_vals <- result_mat[ct, ]
+  test <- cor.test(folh1, ct_vals, method = "spearman")
+  data.frame(
+    CellType = ct,
+    rho = test$estimate,
+    p = test$p.value)})
+cor_folh1 <- do.call(rbind, cor_folh1)
+cor_folh1$FDR <- p.adjust(cor_folh1$p, method="BH")
+cor_folh1 <- cor_folh1[order(abs(cor_folh1$rho), decreasing=TRUE), ]
+
+# GSVA ANALYSIS in TCGA-PRAD: Is FOLH1 (PSMA) expression associated with immune infiltration programs in TCGA prostate adenocarcinoma (PRAD)?
+
+## set
+base_dir <- "C:/Users/Martina/Desktop/TCGA"
+out_dir <- file.path(base_dir, "results")
+dir.create(out_dir,showWarnings = FALSE, recursive = TRUE)
+
+## packages
+library(GSVA)
+library(GSEABase)
+library(MultiAssayExperiment)
+library(SummarizedExperiment)
+library(DESeq2)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(openxlsx)
+library(pheatmap)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(showtext)
+font_add("Arial", "C:/Windows/Fonts/arial.ttf")
+showtext_auto()
+
+## theme
+theme_set(theme_bw(base_size = 16) +
+    theme(
+      text = element_text(family = "Arial"),
+      panel.grid.major = element_line(linewidth = 0.3),
+      panel.grid.minor = element_blank()))
+
+## load & check raw data
+list.files(base_dir)
+rds_file <- file.path(base_dir,"TCGA-PRAD.rds")
+prad <- readRDS(rds_file)
+class(prad)
+cd <- as.data.frame(colData(prad))
+rd <- as.data.frame(rowData(prad))
+dim(prad)
+head(colnames(assay(prad)))
+table(colData(prad)$sample_type)
+head(rowData(prad))
+
+## verify FOLH1 presence
+ens <- gsub("\\..*", "", rd$gene_id)
+symbols <- mapIds(
+  org.Hs.eg.db,
+  keys = ens,
+  column = "SYMBOL",
+  keytype = "ENSEMBL",
+  multiVals = "first"
+)
+rd$symbol <- symbols
+sum(rd$symbol == "FOLH1", na.rm = TRUE)
+
+## normalization
+dds <- DESeqDataSetFromMatrix(
+  countData = assay(prad),
+  colData = colData(prad),
+  design = ~ 1
+)
+dds <- estimateSizeFactors(dds)
+vsd <- varianceStabilizingTransformation(
+  dds,
+  blind = TRUE
+)
+expr_norm <- assay(vsd)
+dim(expr_norm)
+exists("expr_norm")
+
+## primary tumours only
+print(table(cd$sample_type))
+primary_idx <- which(cd$sample_type == "Primary Tumor")
+expr_norm_tumor <- expr_norm[, primary_idx]
+cd_tumor <- cd[primary_idx, ]
+dim(expr_norm_tumor)
+
+## FOLH1 expression
+folh1_idx <- which(rd$symbol == "FOLH1")
+if(length(folh1_idx) == 0){
+  stop("FOLH1 not found.")
+}
+folh1 <- as.numeric(
+  expr_norm_tumor[folh1_idx[1], ]
+)
+
+# dataframe
+df <- data.frame(
+  sample = colnames(expr_norm_tumor),
+  FOLH1 = folh1,
+  sample_type = cd_tumor$sample_type,
+  stringsAsFactors = FALSE)
+
+## ssGSEA immune infiltration
+expr_gsva <- expr_norm_tumor
+rownames(expr_gsva) <- rd$symbol
+expr_gsva <- expr_gsva[
+  !is.na(rownames(expr_gsva)),
+]
+expr_gsva <- expr_gsva[
+  rownames(expr_gsva) != "",
+]
+expr_gsva <- expr_gsva[
+  !duplicated(rownames(expr_gsva)),
+]
+dim(expr_gsva)
+
+## immune signatures
+immune_sets <- list(
+  
+  Cytotoxic_T = c(
+    "CD8A","CD8B","GZMA","GZMB",
+    "PRF1","NKG7","IFNG"
+  ),
+  
+  Treg = c(
+    "FOXP3","IL2RA","CTLA4",
+    "TIGIT","IKZF2"
+  ),
+  
+  Exhausted_T = c(
+    "PDCD1","CTLA4","LAG3",
+    "HAVCR2","TIGIT"
+  ),
+  
+  NK = c(
+    "NCR1","NKG7","GNLY",
+    "KLRD1","PRF1"
+  ),
+  
+  Bcell = c(
+    "CD19","CD79A",
+    "CD79B","MS4A1"
+  ),
+  
+  Macrophage_M2 = c(
+    "CD68","CD163","MRC1",
+    "MSR1","CCL18"
+  ),
+  
+  Dendritic = c(
+    "ITGAX","HLA-DRA",
+    "CLEC10A","FCER1A"
+  ),
+  
+  IFNg_Response = c(
+    "IFNG","STAT1",
+    "CXCL9","CXCL10","IDO1"
+  ),
+  
+  Antigen_Presentation = c(
+    "B2M","HLA-A","HLA-B",
+    "TAP1","TAP2"
+  )
+)
+
+## keep only genes present
+immune_sets <- lapply(
+  immune_sets,
+  function(x)
+    intersect(
+      x,
+      rownames(expr_gsva)
+    )
+)
+immune_sets <- immune_sets[
+  sapply(
+    immune_sets,
+    length
+  ) >= 2
+]
+sapply(immune_sets, length)
+
+## ssGSEA
+ssgsea_par <- ssgseaParam(
+  exprData = as.matrix(expr_gsva),
+  geneSets = immune_sets
+)
+ssgsea_scores <- gsva(ssgsea_par)
+dim(ssgsea_scores)
+rownames(ssgsea_scores)
+
+## FOLH1
+folh1_idx <- which(rd$symbol == "FOLH1")
+folh1 <- as.numeric(
+  expr_norm_tumor[
+    folh1_idx,
+  ]
+)
+
+## dataframe
+df <- data.frame(
+  sample = colnames(expr_norm_tumor),
+  FOLH1 = folh1,
+  stringsAsFactors = FALSE
+)
+for(sig in rownames(ssgsea_scores)){
+  df[[sig]] <- as.numeric(
+    ssgsea_scores[sig, ]
+  )
+}
+
+## FOLH1 HIGH / LOW
+df$FOLH1_group <- ifelse(
+  df$FOLH1 >= median(df$FOLH1),
+  "High",
+  "Low"
+)
+df$FOLH1_group <- factor(
+  df$FOLH1_group,
+  levels = c("Low","High")
+)
+table(df$FOLH1_group)
+
+## Wilcoxon test
+immune_stats <- data.frame()
+for(sig in rownames(ssgsea_scores)){
+  w <- wilcox.test(
+    df[[sig]] ~ df$FOLH1_group
+  )
+  low_med <- median(
+    df[df$FOLH1_group=="Low", sig],
+    na.rm = TRUE
+  )
+  high_med <- median(
+    df[df$FOLH1_group=="High", sig],
+    na.rm = TRUE
+  )
+  immune_stats <- rbind(
+    immune_stats,
+    data.frame(
+      Signature = sig,
+      Low_Median = low_med,
+      High_Median = high_med,
+      Difference = high_med - low_med,
+      p_value = w$p.value
+    )
+  )
+}
+immune_stats$FDR <- p.adjust(
+  immune_stats$p_value,
+  method = "BH"
+)
+immune_stats <- immune_stats[
+  order(immune_stats$FDR),
+]
+immune_stats
+
+## Spearman correlations
+cor_results <- data.frame()
+for(sig in rownames(ssgsea_scores)){
+  ct <- cor.test(
+    df$FOLH1,
+    df[[sig]],
+    method = "spearman",
+    exact = FALSE
+  )
+  cor_results <- rbind(
+    cor_results,
+    data.frame(
+      Signature = sig,
+      rho = unname(ct$estimate),
+      p_value = ct$p.value
+    )
+  )
+}
+cor_results$FDR <- p.adjust(
+  cor_results$p_value,
+  method = "BH"
+)
+cor_results <- cor_results[
+  order(cor_results$FDR),
+]
+cor_results
+print(cor_results)
+
+## top association scatterplot
+top_sig <- cor_results$Signature[1]
+p_scatter <- ggplot(
+  df,
+  aes(
+    x = FOLH1,
+    y = .data[[top_sig]]
+  )
+) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(
+    method = "lm",
+    se = TRUE
+  ) +
+  theme_bw(base_size = 16) +
+  labs(
+    title = paste("FOLH1 vs", top_sig),
+    x = "FOLH1 expression (VST)",
+    y = paste(top_sig, "ssGSEA score")
+  )
+
+## heatmap
+cor_results$Significance <- ifelse(
+  cor_results$FDR < 0.0001, "****",
+  ifelse(
+    cor_results$FDR < 0.001, "***",
+    ifelse(
+      cor_results$FDR < 0.01, "**",
+      ifelse(
+        cor_results$FDR < 0.05, "*",
+        "ns"
+      )
+    )
+  )
+)
+heat <- matrix(
+  cor_results$rho,
+  nrow = 1
+)
+rownames(heat) <- "FOLH1"
+colnames(heat) <- cor_results$Signature
+display_mat <- matrix(
+  paste0(
+    sprintf("%.2f", cor_results$rho),
+    "\n",
+    cor_results$Significance
+  ),
+  nrow = 1
+)
+rownames(display_mat) <- "FOLH1"
+colnames(display_mat) <- cor_results$Signature
+pdf(
+  file.path(
+    out_dir,
+    "FOLH1_GSVA_Immune_Heatmap.pdf"
+  ),
+  width = 10,
+  height = 3
+)
+pheatmap(
+  heat,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  display_numbers = display_mat,
+  fontsize_number = 12,
+  number_color = "black",
+  color = colorRampPalette(
+    c("navy","white","firebrick3")
+  )(100),
+  breaks = seq(-1,1,length.out = 101),
+  main = "FOLH1 correlations with immune programs"
+)
+dev.off()
+
+# boxplots
+plot_df <- df %>%
+  select(
+    FOLH1_group,
+    all_of(rownames(ssgsea_scores))
+  ) %>%
+  pivot_longer(
+    cols = -FOLH1_group,
+    names_to = "Signature",
+    values_to = "Score"
+  )
+sig_labels <- immune_stats %>%
+  select(
+    Signature,
+    FDR
+  )
+
+sig_labels$Significance <- ifelse(
+  sig_labels$FDR < 0.0001, "****",
+  ifelse(
+    sig_labels$FDR < 0.001, "***",
+    ifelse(
+      sig_labels$FDR < 0.01, "**",
+      ifelse(
+        sig_labels$FDR < 0.05, "*",
+        "ns"
+      )
+    )
+  )
+)
+
+sig_labels$label <- paste0(
+  sig_labels$Significance,
+  "\nFDR=",
+  formatC(
+    sig_labels$FDR,
+    format = "e",
+    digits = 2
+  )
+)
+
+ypos <- plot_df %>%
+  group_by(Signature) %>%
+  summarise(
+    y = max(Score, na.rm = TRUE) * 1.15,
+    .groups = "drop"
+  )
+
+sig_labels <- left_join(
+  sig_labels,
+  ypos,
+  by = "Signature"
+)
+
+sig_labels$x <- 1.5
+p <- ggplot(
+  plot_df,
+  aes(
+    FOLH1_group,
+    Score,
+    fill = FOLH1_group
+  )
+) +
+  geom_boxplot(
+    outlier.shape = NA,
+    width = 0.6
+  ) +
+  geom_jitter(
+    width = 0.15,
+    alpha = 0.35,
+    size = 0.7
+  ) +
+  geom_text(
+    data = sig_labels,
+    aes(
+      x = x,
+      y = y,
+      label = label
+    ),
+    inherit.aes = FALSE,
+    size = 5
+  ) +
+  facet_wrap(
+    ~ Signature,
+    scales = "free_y"
+  ) +
+  scale_fill_manual(
+    values = c(
+      Low = "grey70",
+      High = "red3"
+    )
+  ) +
+  theme_bw(base_size = 15) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(face = "bold")
+  ) +
+  labs(
+    title = "Immune programs in FOLH1-high prostate tumors",
+    x = "",
+    y = "ssGSEA score"
+  )
+
+ggsave(
+  file.path(
+    out_dir,
+    "FOLH1_GSVA_ImmunePrograms.pdf"
+  ),
+  p,
+  width = 13,
+  height = 8
+)
+
+## excel output
+wb <- createWorkbook()
+addWorksheet(
+  wb,
+  "Wilcoxon"
+)
+writeData(
+  wb,
+  "Wilcoxon",
+  immune_stats
+)
+addWorksheet(
+  wb,
+  "Correlations"
+)
+writeData(
+  wb,
+  "Correlations",
+  cor_results
+)
+addWorksheet(
+  wb,
+  "Group_Counts"
+)
+writeData(
+  wb,
+  "Group_Counts",
+  data.frame(
+    Group = names(
+      table(df$FOLH1_group)
+    ),
+    Count = as.numeric(
+      table(df$FOLH1_group)
+    )
+  )
+)
+saveWorkbook(
+  wb,
+  file.path(
+    out_dir,
+    "FOLH1_GSVA_ImmunePhenotype.xlsx"
+  ),
+  overwrite = TRUE
+)
+
+# GSEA ANALYSIS in TCGA-PRAD: Which biological programs increase as FOLH1 increases?
+
+## set
+base_dir <- "C:/Users/Martina/Desktop/TCGA"
+out_dir <- file.path(base_dir, "results")
+dir.create(out_dir,showWarnings = FALSE, recursive = TRUE)
+
+## packages
+library(SummarizedExperiment)
+library(dplyr)
+library(ggpubr)
+library(DESeq2)
+library(ggplot2)
+library(ggrepel)
+library(fgsea)
+library(msigdbr)
+library(limma)
+library(openxlsx)
+library(pheatmap)
+library(showtext)
+library(sysfonts)
+library(grid)
+font_add("Arial", "C:/Windows/Fonts/arial.ttf")
+showtext_auto()
+
+## theme
+theme_set(theme_bw(base_size = 16) +
+    theme(
+      text = element_text(family = "Arial"),
+      panel.grid.major = element_line(linewidth = 0.3),
+      panel.grid.minor = element_blank()))
+theme_pub <- function() {
+  theme_classic(base_size = 14) +
+    theme(
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      axis.title = element_text(face = "bold"),
+      axis.text = element_text(color = "black"),
+      legend.position = "none"
+    )
+}
+
+## load & check raw data
+list.files(base_dir)
+rds_file <- file.path(base_dir,"TCGA_PRAD_clinical.rds")
+prad <- readRDS(rds_file)
+class(prad)
+cd <- as.data.frame(colData(prad))
+rd <- as.data.frame(rowData(prad))
+dim(prad)
+head(colnames(assay(prad)))
+table(colData(prad)$sample_type)
+head(rowData(prad))
+colnames(rd)
+
+## verify FOLH1 presence
+rd$symbol <- rd$gene_name
+which(rd$symbol == "FOLH1")
+sum(rd$symbol == "FOLH1", na.rm = TRUE)
+
+## primary tumours only
+print(table(cd$sample_type))
+primary_idx <- which(cd$sample_type == "Primary Tumor")
+prad_tumor <- prad[, primary_idx]
+cd_tumor <- as.data.frame(
+  colData(prad_tumor))
+cat("Primary tumors:",ncol(prad_tumor),"\n")
+
+## VST normalization
+dds <- DESeqDataSetFromMatrix(
+  countData = round(assay(prad_tumor)),
+  colData = colData(prad_tumor),
+  design = ~1)
+vsd <- vst(dds,blind = TRUE)
+expr_norm_tumor <- assay(vsd)
+cat("Genes:",nrow(expr_norm_tumor),"\n")
+cat("Samples:", ncol(expr_norm_tumor),"\n")
+rownames(expr_norm_tumor) <- rd$symbol
+
+## expression matrix
+expr_norm_tumor <- expr_norm_tumor[
+  !is.na(rownames(expr_norm_tumor)),]
+expr_norm_tumor <- expr_norm_tumor[
+  rownames(expr_norm_tumor) != "",]
+
+# keep highest expressed duplicate symbol
+expr_norm_tumor <- expr_norm_tumor[
+  order(rowMeans(expr_norm_tumor), decreasing = TRUE),]
+expr_norm_tumor <- expr_norm_tumor[!duplicated(rownames(expr_norm_tumor)),]
+if(!"FOLH1" %in% rownames(expr_norm_tumor)){stop("FOLH1 not found after filtering")}
+cat("Final matrix:",nrow(expr_norm_tumor),"genes x",ncol(expr_norm_tumor),"samples\n")
+sum(duplicated(rownames(expr_norm_tumor)))
+hist(
+  expr_norm_tumor["FOLH1", ],
+  breaks = 30,
+  main = "FOLH1 expression",
+  xlab = "VST expression"
+)
+
+## prep
+wb <- createWorkbook()
+folh1 <- as.numeric(expr_norm_tumor["FOLH1", ])
+q25 <- as.numeric(quantile(folh1, 0.25))
+q75 <- as.numeric(quantile(folh1, 0.75))
+folh1_summary <- data.frame(
+  Statistic = c(
+    "Min",
+    "1st Quartile",
+    "Median",
+    "Mean",
+    "3rd Quartile",
+    "Max"),
+  Value = c(
+    min(folh1),
+    q25,
+    median(folh1),
+    mean(folh1),
+    q75,
+    max(folh1)))
+folh1_cutoffs <- data.frame(Cutoff = c("Q25","Median","Q75"),
+  Value = c(q25,median(folh1),q75))
+summary_df <- data.frame(
+  Metric = c(
+    "Total samples",
+    "Primary tumors",
+    "Genes before filtering",
+    "Genes after filtering",
+    "FOLH1 row index",
+    "FOLH1 occurrences",
+    "Min FOLH1",
+    "Q25 FOLH1",
+    "Median FOLH1",
+    "Mean FOLH1",
+    "Q75 FOLH1",
+    "Max FOLH1"),
+  Value = c(
+    ncol(prad),
+    ncol(prad_tumor),
+    nrow(prad),
+    nrow(expr_norm_tumor),
+    which(rd$symbol == "FOLH1"),
+    sum(rd$symbol == "FOLH1", na.rm = TRUE),
+    min(folh1),
+    q25,
+    median(folh1),
+    mean(folh1),
+    q75,
+    max(folh1)))
+sample_counts <- data.frame(
+  Sample_Type = names(table(cd$sample_type)),
+  Count = as.numeric(table(cd$sample_type)))
+pdf(file.path(out_dir,"FOLH1_Expression_Histogram.pdf"),width = 7,height = 6)
+hist(folh1,breaks = 30,
+     main = "FOLH1 expression in TCGA-PRAD", xlab = "VST expression")
+dev.off()
+png(
+  file.path(out_dir,"FOLH1_Expression_Histogram.png"),
+  width = 1800,
+  height = 1500,
+  res = 300
+)
+hist(
+  folh1,
+  breaks = 30,
+  main = "FOLH1 expression in TCGA-PRAD",
+  xlab = "VST expression"
+)
+dev.off()
+
+## Which genes correlate with FOLH1? Spearman correlations
+folh1 <- as.numeric(expr_norm_tumor["FOLH1", ])
+gene_cor <- apply(expr_norm_tumor,1,
+  function(x)
+    cor(
+      x,
+      folh1,
+      method = "spearman",
+      use = "pairwise.complete.obs"))
+gene_p <- apply(expr_norm_tumor, 1,
+  function(x)
+    cor.test(
+      x,
+      folh1,
+      method = "spearman",
+      exact = FALSE
+    )$p.value)
+cor_genes <- data.frame(Gene = rownames(expr_norm_tumor),rho = gene_cor,p_value = gene_p, stringsAsFactors = FALSE)
+cor_genes$FDR <- p.adjust(cor_genes$p_value,method = "BH")
+cor_genes <- cor_genes[cor_genes$Gene != "FOLH1",]
+cor_genes <- cor_genes[order(-cor_genes$rho),]
+sig_genes <- cor_genes %>% filter(FDR < 0.05 & abs(rho) > 0.30)
+top_positive <- cor_genes %>%
+  arrange(desc(rho)) %>%
+  slice(1:100)
+top_negative <- cor_genes %>%
+  arrange(rho) %>%
+  slice(1:100)
+
+## Which pathways are associated with high FOLH1 expression? correlation coefficients as ranking metrik
+ranks <- cor_genes$rho
+names(ranks) <- cor_genes$Gene
+ranks <- ranks[!is.na(ranks)]
+ranks <- ranks[!duplicated(names(ranks))]
+ranks <- sort(ranks,decreasing = TRUE)
+hallmark <- msigdbr(species = "Homo sapiens",category = "H")
+pathways <- split(hallmark$gene_symbol,hallmark$gs_name)
+fgsea_res <- fgsea(
+  pathways = pathways,
+  stats = ranks,
+  minSize = 15,
+  maxSize = 500)
+fgsea_res <- fgsea_res[order(fgsea_res$padj),]
+fgsea_export <- as.data.frame(fgsea_res)
+fgsea_export$leadingEdge <- sapply(
+  fgsea_export$leadingEdge,
+  paste,
+  collapse = ";")
+write.csv(fgsea_export,file.path(out_dir,"TCGA-PRAD_FOLH1_PathwaysCorrelation.csv"),row.names = FALSE)
+fgsea_export[
+  order(fgsea_export$padj),
+  c("pathway","NES","padj")][1:20, ]
+
+## What pathways differ between FOLH1-high and FOLH1-low tumors? use of Q25/Q75 cutoffs
+folh1 <- as.numeric(expr_norm_tumor["FOLH1", ])
+q25 <- quantile(folh1,0.25)
+q75 <- quantile(folh1,0.75)
+group <- rep(NA,length(folh1))
+group[folh1 <= q25] <- "Low"
+group[folh1 >= q75] <- "High"
+keep <- !is.na(group)
+expr_sub <- expr_norm_tumor[,keep]
+group <- factor(
+  group[keep],
+  levels = c("Low","High"))
+table(group)
+folh1_groups <- data.frame(
+  Sample = colnames(expr_sub),
+  Group = group,
+  FOLH1_VST = folh1[keep],
+  stringsAsFactors = FALSE
+)
+write.csv(
+  folh1_groups,
+  file.path(
+    out_dir,
+    "FOLH1_HighLow_Samples.csv"
+  ),
+  row.names = FALSE
+)
+design <- model.matrix(~ group)
+fit <- lmFit(expr_sub,design)
+fit <- eBayes(fit)
+deg <- topTable(
+  fit,
+  coef = 2,
+  number = Inf,
+  sort.by = "none")
+deg$Gene <- rownames(deg)
+write.csv(
+  deg,
+  file.path(
+    out_dir,
+    "FOLH1_High_vs_Low_DEGs.csv"
+  ),
+  row.names = FALSE
+)
+ranks <- deg$t
+names(ranks) <- rownames(deg)
+ranks <- ranks[!is.na(ranks)]
+ranks <- ranks[!duplicated(names(ranks))]
+ranks <- sort(
+  ranks,
+  decreasing = TRUE)
+hallmark <- msigdbr(
+  species = "Homo sapiens",
+  category = "H"
+)
+pathways <- split(
+  hallmark$gene_symbol,
+  hallmark$gs_name
+)
+fgsea_group <- fgsea(
+  pathways = pathways,
+  stats = ranks,
+  minSize = 15,
+  maxSize = 500)
+fgsea_group <- fgsea_group[
+  order(fgsea_group$padj),]
+fgsea_group_export <- as.data.frame(
+  fgsea_group
+)
+fgsea_group_export$leadingEdge <- sapply(
+  fgsea_group_export$leadingEdge,
+  paste,
+  collapse = ";"
+)
+write.csv(
+  fgsea_group_export,
+  file.path(
+    out_dir,
+    "FOLH1_High_vs_Low_Pathways.csv"),
+  row.names = FALSE
+)
+print(
+  fgsea_group_export[
+    order(fgsea_group_export$padj),
+    c(
+      "pathway",
+      "NES",
+      "padj"
+    )
+  ][1:20, ]
+)
+top_pathways <- fgsea_group_export %>%
+  arrange(padj) %>%
+  slice(1:15)
+write.csv(
+  top_pathways,
+  file.path(
+    out_dir,
+    "Top15_FOLH1_High_vs_Low_Pathways.csv"
+  ),
+  row.names = FALSE
+)
+
+## summary
+addWorksheet(wb, "QC_Summary")
+writeData(wb, "QC_Summary", summary_df)
+addWorksheet(wb, "Sample_Counts")
+writeData(wb, "Sample_Counts", sample_counts)
+addWorksheet(wb, "FOLH1_Summary")
+writeData(wb, "FOLH1_Summary", folh1_summary)
+addWorksheet(wb, "FOLH1_Cutoffs")
+writeData(wb, "FOLH1_Cutoffs", folh1_cutoffs)
+addWorksheet(wb, "All_Correlations")
+writeData(wb, "All_Correlations", cor_genes)
+addWorksheet(wb, "Significant_Correlations")
+writeData(wb, "Significant_Correlations", sig_genes)
+addWorksheet(wb, "Top100_Positive")
+writeData(wb, "Top100_Positive", top_positive)
+addWorksheet(wb, "Top100_Negative")
+writeData(wb, "Top100_Negative", top_negative)
+addWorksheet(wb, "Corr_GSEA_All")
+writeData(wb, "Corr_GSEA_All", fgsea_export)
+corr_sig <- fgsea_export %>%
+  filter(padj < 0.05)
+addWorksheet(wb, "Corr_GSEA_Significant")
+writeData(wb, "Corr_GSEA_Significant", corr_sig)
+corr_top15 <- fgsea_export %>%
+  arrange(padj) %>%
+  slice(1:15)
+addWorksheet(wb, "Corr_GSEA_Top15")
+writeData(wb, "Corr_GSEA_Top15", corr_top15)
+addWorksheet(wb, "FOLH1_Groups")
+writeData(wb, "FOLH1_Groups", folh1_groups)
+addWorksheet(wb, "High_vs_Low_DEGs")
+writeData(wb, "High_vs_Low_DEGs", deg)
+deg_sig <- deg %>%
+  filter(adj.P.Val < 0.05)
+addWorksheet(wb, "Significant_DEGs")
+writeData(wb, "Significant_DEGs", deg_sig)
+deg_top_up <- deg %>%
+  arrange(desc(logFC)) %>%
+  slice(1:100)
+addWorksheet(wb, "Top100_Upregulated")
+writeData(wb, "Top100_Upregulated", deg_top_up)
+group_counts <- data.frame(
+  Group = names(table(group)),
+  Count = as.numeric(table(group))
+)
+addWorksheet(wb, "Group_Counts")
+writeData(wb, "Group_Counts", group_counts)
+deg_top_down <- deg %>%
+  arrange(logFC) %>%
+  slice(1:100)
+addWorksheet(wb, "Top100_Downregulated")
+writeData(wb, "Top100_Downregulated", deg_top_down)
+addWorksheet(wb, "HighLow_GSEA_All")
+writeData(wb, "HighLow_GSEA_All", fgsea_group_export)
+group_sig <- fgsea_group_export %>%
+  filter(padj < 0.05)
+addWorksheet(wb, "HighLow_GSEA_Significant")
+writeData(wb, "HighLow_GSEA_Significant", group_sig)
+addWorksheet(wb, "HighLow_GSEA_Top15")
+writeData(wb, "HighLow_GSEA_Top15", top_pathways)
+summary_results <- data.frame(
+  Metric = c(
+    "Total genes tested",
+    "Significant correlated genes",
+    "Top positive genes",
+    "Top negative genes",
+    "High tumors",
+    "Low tumors",
+    "Significant DEGs",
+    "Significant correlation pathways",
+    "Significant High-vs-Low pathways"
+  ),
+  Value = c(
+    nrow(cor_genes),
+    nrow(sig_genes),
+    nrow(top_positive),
+    nrow(top_negative),
+    sum(group == "High"),
+    sum(group == "Low"),
+    nrow(deg_sig),
+    nrow(corr_sig),
+    nrow(group_sig)
+  )
+)
+addWorksheet(wb, "Summary")
+writeData(wb, "Summary", summary_results)
+saveWorkbook(
+  wb,
+  file.path(
+    out_dir,
+    "TCGA_PRAD_FOLH1_MasterResults.xlsx"
+  ),
+  overwrite = TRUE
+)
+
+## plots
+#FOLH1 distribution
+p1 <- ggplot(data.frame(FOLH1 = folh1), aes(FOLH1)) +
+  geom_histogram(bins = 30, fill = "#2C7FB8", color = "white") +
+  geom_vline(xintercept = c(q25, median(folh1), q75),
+             linetype = c("dashed","solid","dashed"),
+             linewidth = 0.8,
+             color = "black") +
+  labs(title = "FOLH1 Expression Distribution",
+       x = "VST Expression",
+       y = "Count") +
+  theme_pub()
+print(p1)
+ggsave(
+  file.path(out_dir,"Figure1_FOLH1_Distribution.pdf"),
+  p1, width = 7, height = 6)
+
+# FOLH1 high vs low
+p2 <- ggplot(folh1_groups, aes(Group, FOLH1_VST, fill = Group)) +
+  geom_boxplot(width = 0.6, outlier.shape = NA) +
+  geom_jitter(width = 0.15, alpha = 0.5, size = 1) +
+  scale_fill_manual(values = c("Low" = "#74a9cf", "High" = "#045a8d")) +
+  labs(title = "FOLH1 Expression: High vs Low",
+       x = "",
+       y = "VST Expression") +
+  theme_pub()
+print(p2)
+ggsave(
+  file.path(out_dir,"Figure2_FOLH1_HighLow_Boxplot.pdf"),
+  p2, width = 6, height = 6)
+
+#FOLH1 boxplot
+p3 <- ggplot(data.frame(FOLH1 = folh1), aes(y = FOLH1)) +
+  geom_boxplot(fill = "#2C7FB8", width = 0.4, outlier.alpha = 0.3) +
+  labs(title = "FOLH1 Expression Summary",
+       y = "VST Expression") +
+  theme_pub()
+print(p3)
+ggsave(
+  file.path(out_dir,"Figure3_FOLH1_Boxplot.pdf"),
+  p3,
+  width = 4,
+  height = 6)
+
+#top20 FOLH1 positive correlations
+p4 <- ggplot(top20, aes(reorder(Gene, rho), rho)) +
+  geom_col(fill = "#1f78b4") +
+  coord_flip() +
+  labs(title = "Top Positive Correlations with FOLH1",
+       x = "",
+       y = "Spearman ρ") +
+  theme_pub()
+print(p4)
+ggsave(
+  file.path(out_dir,"Figure4_Top20_PositiveCorrelations.pdf"),
+  p4,
+  width = 8,
+  height = 6)
+
+##top20 FOLH1 negative correlations
+p5 <- ggplot(top20neg, aes(reorder(Gene, rho), rho)) +
+  geom_col(fill = "#b2182b") +
+  coord_flip() +
+  labs(title = "Top Negative Correlations with FOLH1",
+       x = "",
+       y = "Spearman ρ") +
+  theme_pub()
+print(p5)
+ggsave(
+  file.path(out_dir,"Figure5_Top20_NegativeCorrelations.pdf"),
+  p5,
+  width = 8,
+  height = 6
+)
+
+#correlation volcano 
+p6 <- ggplot(cor_genes_plot, aes(rho, logFDR)) +
+  geom_point(alpha = 0.4, size = 1, color = "grey40") +
+  geom_vline(xintercept = c(-0.3, 0.3), linetype = "dashed") +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  labs(title = "FOLH1 Correlation Volcano",
+       x = "Spearman ρ",
+       y = "-log10(FDR)") +
+  theme_pub()
+print(p6)
+ggsave(
+  file.path(out_dir, "Figure6_Correlation_Volcano.pdf"),
+  p6,
+  width = 7,
+  height = 6
+)
+
+#heatmap of FOLH1 top50 correlated genes
+genes50 <- top_positive$Gene[1:50]
+genes50 <- genes50[!is.na(genes50)]
+genes50 <- intersect(genes50, rownames(expr_norm_tumor))
+mat <- expr_norm_tumor[genes50, , drop = FALSE]
+mat <- mat[apply(mat, 1, function(x) sd(x, na.rm = TRUE) > 0), , drop = FALSE]
+stopifnot(nrow(mat) > 0)
+gene_direction <- ifelse(rowMeans(mat) > median(rowMeans(mat)),
+  "High expression",
+  "Low expression")
+annotation_row <- data.frame(ExpressionLevel = gene_direction)
+annotation_col <- data.frame(Group = group)
+ann_colors <- list(
+  Group = c(Low = "#74a9cf", High = "#045a8d"),
+  ExpressionLevel = c("High expression" = "#d73027","Low expression" = "#4575b4"))
+pheatmap(
+  mat,
+  scale = "row",
+  cluster_rows = TRUE,
+  cluster_cols = TRUE,
+  show_colnames = FALSE,
+  fontsize_row = 7,
+  annotation_col = annotation_col,
+  annotation_row = annotation_row,
+  annotation_colors = ann_colors,
+  color = colorRampPalette(c("#2166ac", "white", "#b2182b"))(100),
+  main = "Top 50 Genes Correlated with FOLH1 (Spearman)",
+  border_color = NA,
+  filename = file.path(out_dir, "Figure7_Top50_CorrelatedGenes_Heatmap.pdf"),
+  width = 11,
+  height = 12)
+
+#GSEA correlation
+corr_top15 <- fgsea_export %>%
+  arrange(padj) %>%
+  slice(1:15)
+p8 <- ggplot(corr_top15, aes(reorder(pathway, NES), NES)) +
+  geom_col(fill = "#4575b4") +
+  coord_flip() +
+  labs(title = "Pathways Associated with FOLH1",
+       x = "",
+       y = "NES") +
+  theme_pub() +
+  theme(
+    text = element_text(family = "Arial"),
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14, family = "Arial"),
+    axis.title = element_text(face = "bold", family = "Arial"),
+    axis.text = element_text(family = "Arial"),
+    panel.spacing = unit(1, "lines")
+  )
+print(p8)
+ggsave(
+  file.path(out_dir,"Figure8_CorrelationGSEA.pdf"),
+  p8,
+  width = 9,
+  height = 7
+)
+
+#DEG volcano
+deg$logFDR <- -log10(deg$adj.P.Val)
+p9 <- ggplot(deg, aes(logFC, logFDR)) +
+  geom_point(alpha = 0.4, color = "grey40") +
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed") +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  labs(title = "Differential Expression (High vs Low FOLH1)",
+       x = "log2 Fold Change",
+       y = "-log10(FDR)") +
+  theme_pub()
+print(p9)
+ggsave(
+  file.path(out_dir,"Figure9_DEG_Volcano.pdf"),
+  p9,
+  width = 7,
+  height = 6
+)
+
+#FOLH1 expression across TCGA-PRAD cohort (waterfall plot)
+folh1_df <- data.frame(
+  Sample = colnames(expr_norm_tumor),
+  FOLH1 = as.numeric(expr_norm_tumor["FOLH1", ])
+)
+
+folh1_df <- folh1_df %>%
+  arrange(FOLH1) %>%
+  mutate(
+    Rank = 1:n(),
+    Group = case_when(
+      FOLH1 <= q25 ~ "Low",
+      FOLH1 >= q75 ~ "High",
+      TRUE ~ "Intermediate"
+    )
+  )
+
+p_fig10 <- ggplot(
+  folh1_df,
+  aes(
+    x = Rank,
+    y = FOLH1,
+    fill = Group
+  )
+) +
+  geom_col(width = 1) +
+  geom_hline(
+    yintercept = q25,
+    linetype = "dashed",
+    linewidth = 0.6
+  ) +
+  geom_hline(
+    yintercept = q75,
+    linetype = "dashed",
+    linewidth = 0.6
+  ) +
+  scale_fill_manual(
+    values = c(
+      Low = "#3182bd",
+      Intermediate = "grey80",
+      High = "#b2182b"
+    )
+  ) +
+  labs(
+    title = "Distribution of FOLH1 Expression in TCGA-PRAD",
+    subtitle = paste0(
+      "Low ≤ Q25 (n=",
+      sum(folh1_df$Group=="Low"),
+      "), High ≥ Q75 (n=",
+      sum(folh1_df$Group=="High"),
+      ")"
+    ),
+    x = "Patients ranked by FOLH1 expression",
+    y = "VST-normalized FOLH1 expression"
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    text = element_text(family = "Arial"),
+    plot.title = element_text(
+      face = "bold",
+      hjust = 0.5
+    ),
+    plot.subtitle = element_text(
+      hjust = 0.5
+    ),
+    legend.position = "top"
+  )
+ggsave(
+  file.path(
+    out_dir,
+    "Figure10_FOLH1exp_waterfallplot.pdf"
+  ),
+  p_fig10,
+  width = 10,
+  height = 5
+)
+
+#high vs low pathway enrichment
+p11 <- ggplot(top_pathways, aes(reorder(pathway, NES), NES)) +
+  geom_col(fill = "#762a83") +
+  coord_flip() +
+  labs(title = "Pathways in High vs Low FOLH1 Tumors",
+       x = "",
+       y = "NES") +
+  theme_pub()
+print(p11)
+ggsave(
+  file.path(
+    out_dir,
+    "Figure11_HighLow_GSEA.pdf"
+  ),
+  p11,
+  width = 9,
+  height = 7
+)
+
+#FOLH1-centered correlation network
+library(igraph)
+top_net <- top_positive[1:30, ]
+edges <- data.frame(
+  from = "FOLH1",
+  to = top_net$Gene,
+  weight = top_net$rho
+)
+g <- graph_from_data_frame(edges)
+node_size <- rep(5, vcount(g))
+names(node_size) <- V(g)$name
+node_size[top_net$Gene] <-
+  scales::rescale(
+    top_net$rho,
+    to = c(5, 10)
+  )
+node_size["FOLH1"] <- 22
+V(g)$size <- node_size
+V(g)$color <- "#4D4D4D"
+V(g)$color[V(g)$name == "FOLH1"] <- "#B2182B"
+top_labels <- c(
+  "FOLH1",
+  top_net$Gene[1:12]
+)
+V(g)$label <- V(g)$name
+V(g)$label.cex <- ifelse(
+  V(g)$name == "FOLH1",
+  1.2,
+  0.65
+)
+V(g)$label.family <- "Arial"
+V(g)$label.color <- "black"
+V(g)$frame.color <- NA
+E(g)$width <-
+  scales::rescale(
+    edges$weight,
+    to = c(0.8, 3)
+  )
+E(g)$color <- adjustcolor(
+  "#7F7F7F",
+  alpha.f = 0.45
+)
+lay <- layout_as_star(
+  g,
+  center = which(
+    V(g)$name == "FOLH1"
+  )
+)
+pdf(
+  file.path(
+    out_dir,
+    "Figure12_FOLH1_top30genes_CorrelationNetwork.pdf"
+  ),
+  width = 10,
+  height = 10,
+  useDingbats = FALSE
+)
+par(
+  mar = c(1,1,1,1)
+)
+plot(
+  g,
+  layout = lay,
+  vertex.label.dist = 1.8,
+  vertex.label.degree = seq(
+    0,
+    2*pi,
+    length.out = vcount(g)
+  ),
+  edge.curved = 0,
+  asp = 0
+)
+mtext(
+  "FOLH1-Centered Correlation Network (Top 30 Positively Correlated Genes)",
+  side = 3,
+  line = -1,
+  cex = 1.1,
+  font = 2
+)
+dev.off()
+
+#genome-wide correlation ranking of genes with FOLH1
+cor_rank <- cor_genes %>%
+  arrange(desc(rho)) %>%
+  mutate(Rank = seq_len(n()))
+p_rank <- ggplot(
+  cor_rank,
+  aes(x = Rank, y = rho)
+) +
+  geom_line(
+    colour = "#2C7FB8",
+    linewidth = 0.9
+  ) +
+  geom_hline(
+    yintercept = 0,
+    linetype = "dashed",
+    colour = "grey50",
+    linewidth = 0.5
+  ) +
+  annotate(
+    "text",
+    x = max(cor_rank$Rank) * 0.05,
+    y = max(cor_rank$rho),
+    label = paste0(
+      "Positively correlated\nn = ",
+      sum(cor_rank$rho > 0)
+    ),
+    hjust = 0,
+    family = "Arial",
+    size = 4
+  ) +
+  annotate(
+    "text",
+    x = max(cor_rank$Rank) * 0.95,
+    y = min(cor_rank$rho),
+    label = paste0(
+      "Negatively correlated\nn = ",
+      sum(cor_rank$rho < 0)
+    ),
+    hjust = 1,
+    family = "Arial",
+    size = 4
+  ) +
+  labs(
+    title = "Genome-wide Correlation Landscape of FOLH1",
+    x = "Genes Ranked by Spearman Correlation",
+    y = expression(Spearman~rho)
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    text = element_text(family = "Arial"),
+    plot.title = element_text(
+      hjust = 0.5,
+      face = "bold",
+      size = 16
+    ),
+    axis.title = element_text(
+      face = "bold"
+    ),
+    axis.text = element_text(
+      colour = "black"
+    )
+  )
+ggsave(
+  file.path(
+    out_dir,
+    "Figure13_CorrelationRankCurve.pdf"
+  ),
+  p_rank,
+  width = 8,
+  height = 6
+)
+
+#Hallmark enrichment bubble plot
+hallmark_plot <- fgsea_group_export %>%
+  arrange(padj) %>%
+  slice(1:20)
+hallmark_plot$pathway <- gsub(
+  "HALLMARK_",
+  "",
+  hallmark_plot$pathway
+)
+hallmark_plot$pathway <- factor(
+  hallmark_plot$pathway,
+  levels = hallmark_plot$pathway[
+    order(hallmark_plot$NES)
+  ]
+)
+p_bubble <- ggplot(
+  hallmark_plot,
+  aes(
+    x = NES,
+    y = pathway
+  )
+) +
+  geom_point(
+    aes(
+      size = -log10(padj),
+      colour = NES
+    ),
+    alpha = 0.9
+  ) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    colour = "grey50",
+    linewidth = 0.5
+  ) +
+  scale_colour_gradient2(
+    low = "#2166AC",
+    mid = "white",
+    high = "#B2182B",
+    midpoint = 0,
+    name = "NES"
+  ) +
+  scale_size_continuous(
+    name = expression(-log[10](FDR))
+  ) +
+  labs(
+    title = "Hallmark Pathways Enriched in FOLH1-High versus FOLH1-Low Tumours",
+    x = "Normalized Enrichment Score (NES)",
+    y = NULL
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    text = element_text(family = "Arial"),
+    plot.title = element_text(
+      face = "bold",
+      hjust = 0.5,
+      size = 16
+    ),
+    axis.title.x = element_text(
+      face = "bold"
+    ),
+    axis.text.y = element_text(
+      size = 11
+    ),
+    legend.title = element_text(
+      face = "bold"
+    ),
+    legend.position = "right"
+  )
+ggsave(
+  file.path(
+    out_dir,
+    "Figure14_GSEA_bubbleplot.pdf"
+  ),
+  p_bubble,
+  width = 10,
+  height = 8
+)
+
+#expression heatmap of Hallmark leading-edge genes
+top_path <- fgsea_group$pathway[1]
+lead_genes <- fgsea_group$leadingEdge[[1]]
+lead_genes <- intersect(
+  lead_genes,
+  rownames(expr_sub)
+)
+mat <- expr_sub[
+  lead_genes,
+  ,
+  drop = FALSE
+]
+mat <- mat[
+  apply(
+    mat,
+    1,
+    function(x) sd(x, na.rm = TRUE) > 0
+  ),
+  ,
+  drop = FALSE
+]
+mat_z <- t(scale(t(mat)))
+ord <- order(group)
+mat_z <- mat_z[, ord]
+annotation_col <- data.frame(
+  Group = group[ord]
+)
+rownames(annotation_col) <- colnames(mat_z)
+ann_colors <- list(
+  Group = c(
+    Low  = "#9ecae1",
+    High = "#08519c"
+  )
+)
+heat_cols <- colorRampPalette(
+  c("#2166AC", "white", "#B2182B")
+)(100)
+pdf(
+  file.path(
+    out_dir,
+    "Figure15_LeadingEdgeGenes_Heatmap.pdf"
+  ),
+  width = 10,
+  height = 12
+)
+pheatmap(
+  mat,
+  scale = "row",
+  annotation_col = annotation_col,
+  annotation_colors = ann_colors,
+  show_colnames = FALSE,
+  border_color = NA,
+  main = paste0(
+    "MYC Targets V1:Leading-Edge Genes: ",
+    gsub("HALLMARK_", "", top_path)))
+dev.off()
+
+#expression heatmap of top25 Hallmark leading-edge genes
+top_path <- fgsea_group$pathway[1]
+lead_genes <- fgsea_group$leadingEdge[[1]]
+lead_genes <- intersect(lead_genes, rownames(expr_sub))
+lead_deg <- deg[lead_genes, , drop = FALSE]
+lead_deg <- lead_deg[order(abs(lead_deg$t), decreasing = TRUE), ]
+lead_genes <- rownames(lead_deg)[1:min(25, nrow(lead_deg))]
+mat <- expr_sub[lead_genes, , drop = FALSE]
+mat_z <- t(scale(t(mat)))
+ord <- order(group)
+mat_z <- mat_z[, ord]
+annotation_col <- data.frame(
+  Group = group[ord]
+)
+rownames(annotation_col) <- colnames(mat_z)
+ann_colors <- list(
+  Group = c(
+    Low  = "#9ecae1",
+    High = "#08519c"
+  )
+)
+heat_cols <- colorRampPalette(
+  c("#2166AC", "white", "#B2182B")
+)(100)
+pheatmap(
+  mat_z,
+  scale = "none",
+  cluster_rows = TRUE,
+  cluster_cols = FALSE,
+  annotation_col = annotation_col,
+  annotation_colors = ann_colors,
+  color = heat_cols,
+  border_color = NA,
+  show_colnames = FALSE,
+  show_rownames = TRUE,
+  fontsize_row = 10,
+  fontsize = 10,
+  treeheight_row = 40,
+  treeheight_col = 0,
+  main = paste0(
+    "Top 25 Leading-Edge Genes (",
+    gsub("HALLMARK_", "", top_path),
+    ")"
+  ),
+  filename = file.path(
+    out_dir,
+    "Figure17_Top25_LeadingEdge_Heatmap.pdf"
+  ),
+  width = 8,
+  height = 10
+)
+
+#FOLH1 vs top correlated gene scatterplots
+gene <- "AR"
+df <- data.frame(
+  FOLH1 = expr_norm_tumor["FOLH1",],
+  Gene = expr_norm_tumor[gene,])
+cor_res <- cor.test(
+  df$FOLH1,
+  df$Gene,
+  method = "spearman"
+)
+rho <- round(cor_res$estimate, 3)
+pval <- signif(cor_res$p.value, 3)
+p_scatter <- ggplot(
+  df,
+  aes(x = FOLH1, y = Gene)) +
+  geom_point(
+    size = 2.8,
+    alpha = 0.75,
+    color = "#2C7FB8") +
+  geom_smooth(
+    method = "lm",
+    formula = y ~ x,
+    color = "#D7301F",
+    linewidth = 1.2,
+    fill = "#D7301F",
+    alpha = 0.15) +
+  annotate(
+    "label",
+    x = Inf,
+    y = Inf,
+    hjust = 1.05,
+    vjust = 1.2,
+    size = 5,
+    family = "Arial",
+    label = paste0(
+      "Spearman rho = ", rho,
+      "\nP = ", pval)) +
+  labs(
+    title = "Association Between FOLH1 and AR Expression",
+    subtitle = paste0("TCGA-PRAD (n = ", nrow(df), ")"),
+    x = "FOLH1 expression (VST)",
+    y = paste0(gene, " expression (VST)")) +
+  theme_classic(base_size = 16) +
+  theme(
+    text = element_text(family = "Arial"),
+    plot.title = element_text(
+      face = "bold",
+      size = 18,
+      hjust = 0.5),
+    plot.subtitle = element_text(
+      hjust = 0.5,
+      size = 13),
+    axis.title = element_text(
+      face = "bold",
+      size = 15),
+    axis.text = element_text(
+      color = "black",
+      size = 12),
+    panel.border = element_rect(
+      color = "black",
+      fill = NA,
+      linewidth = 0.8))
+print(p_scatter)
+ggsave(
+  file.path(
+    out_dir,
+    "Figure16_FOLH1&AR_Scatter.pdf"),
+  p_scatter,
+  width = 7,
+  height = 6,
+  device = cairo_pdf)
+
+
+while (!is.null(dev.list())) dev.off()
+# Immune vs Stromal Score in TCGA-PRAD: Is the tumor microenvironment more immune-dominant or stromal-dominant? Do prostate tumors exhibit “hot” or “cold” immune phenotypes? Is immune infiltration associated with tumor aggressiveness? Does FOLH1 relate to immune suppression or remodeling? Does prostate cancer show immune–stromal antagonism? Which immune cell types are most altered in PRAD? Is tumor immune infiltration homogeneous or heterogeneous? Which tumors might respond to immunotherapy? Can FOLH1 be a biomarker of immune exclusion? Does tumor grade reflect immune landscape remodeling?
+
+## set
+base_dir <- "C:/Users/Martina/Desktop/TCGA"
+setwd(base_dir)
+out_dir <- file.path(base_dir, "results")
+dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+
+## packages
+library(SummarizedExperiment)
+library(immunedeconv)
+library(dplyr)
+library(ggpubr)
+library(ggplot2)
+library(limma)
+library(pheatmap)
+library(openxlsx)
+library(RColorBrewer)
+
+## theme
+theme_nature <- function() {
+  theme_classic(base_size = 14) +
+    theme(
+      text = element_text(family = "Arial"),
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+      axis.title = element_text(face = "bold"),
+      axis.text = element_text(color = "black"),
+      axis.line = element_line(linewidth = 0.6),
+      axis.ticks = element_line(linewidth = 0.6),
+      legend.position = "right")}
+
+## load & check raw data
+rds_file <- file.path(base_dir, "TCGA_PRAD_clinical.rds")
+prad <- readRDS(rds_file)
+class(prad)
+dim(prad)
+table(colData(prad)$sample_type)
+assayNames(prad)
+summary(assay(prad, "fpkm_uq_unstrand")[,1])
+
+## verify FOLH1 presence
+rd <- as.data.frame(rowData(prad))
+rd$symbol <- rd$gene_name
+which(rd$symbol == "FOLH1")
+sum(rd$symbol == "FOLH1", na.rm = TRUE)
+
+## extract & clean expression matrix
+expr <- assay(prad, "fpkm_uq_unstrand")
+genes <- rowData(prad)$gene_name
+rownames(expr) <- genes
+expr <- expr[rownames(expr) != "", ]
+expr <- expr[!is.na(rownames(expr)), ]
+expr <- expr[!duplicated(rownames(expr)), ]
+expr <- as.matrix(expr)
+storage.mode(expr) <- "double"
+sample_info <- as.data.frame(colData(prad), stringsAsFactors = FALSE)
+gene_info <- as.data.frame(rowData(prad))
+sample_info <- data.frame(lapply(sample_info, function(x) {
+  if (is.list(x)) {
+    return(as.character(x))
+  } else {
+    return(x)
+  }
+}), check.names = FALSE)
+
+## immune vs stromal score
+group <- sample_info$sample_type
+names(group) <- sample_info$barcode
+group <- group[colnames(result_mat)]
+keep <- group %in% c("Primary Tumor", "Solid Tissue Normal")
+expr_mat <- result_mat[, keep]
+group <- droplevels(factor(group[keep]))
+immune_score <- colMeans(expr_mat[c("T cell","NK cell","cytotoxicity score"), ], na.rm = TRUE)
+stromal_score <- colMeans(expr_mat[c("Cancer associated fibroblast","Endothelial cell"), ], na.rm = TRUE)
+df2 <- data.frame(
+  Sample = names(immune_score),
+  Immune = immune_score,
+  Stromal = stromal_score,
+  Group = group)
+pdf(file.path(out_dir, "15_TCGA_PRAD_ImmunevsStromal_plot.pdf"), 7, 6)
+ggboxplot(df2,
+          x = "Group",
+          y = "Immune",
+          fill = "Group",
+          palette = c("#4575B4", "#D73027"),
+          add = "jitter",
+          alpha = 0.4,
+          linewidth = 0.5) +
+  stat_compare_means(method = "wilcox.test", label = "p.signif") +
+  labs(
+    title = "Immune Infiltration in TCGA-PRAD",
+    x = "",
+    y = "Immune Score"
+  ) +
+  theme_nature()
+dev.off()
+
+## hot vs cold tumour
+immune_total <- immune_score
+cutoff <- median(immune_total, na.rm = TRUE)
+df2$ImmuneState <- ifelse(immune_total > cutoff, "Hot", "Cold")
+pdf(file.path(out_dir, "15_TCGA-PRAD_HotvsCold_plot.pdf"), 8, 8)
+ggplot(df2, aes(x = ImmuneState, fill = ImmuneState)) +
+  geom_bar(width = 0.6) +
+  geom_text(stat = "count",
+            aes(label = ..count..),
+            vjust = -0.5,
+            size = 5) +
+  scale_fill_manual(values = c(
+    "Hot" = "#D73027",
+    "Cold" = "#4575B4")) +
+  labs(
+    title = "Immune Phenotypes in TCGA-PRAD",
+    x = "",
+    y = "Number of Samples") +
+  theme_nature() +
+  theme(legend.position = "none")
+dev.off()
+
+## Gleason score 
+samples <- colnames(expr_mat)
+group <- sample_info$sample_type
+names(group) <- sample_info$barcode
+gleason <- sample_info$gleason_score
+names(gleason) <- sample_info$barcode
+group2 <- group[samples]
+gleason2 <- gleason[samples]
+immune_total <- immune_total[samples]
+df3 <- data.frame(
+  Sample = samples,
+  Immune = immune_total,
+  Gleason = gleason2,
+  Group = group2)
+df3 <- df3[!is.na(df3$Gleason), ]
+pdf(file.path(out_dir, "15_TCGA-PRAD_GleasonScore_plot.pdf"), 7, 6)
+ggscatter(df3,
+          x = "Gleason",
+          y = "Immune",
+          add = "reg.line",
+          conf.int = TRUE,
+          cor.coef = TRUE,
+          cor.method = "spearman",
+          color = "steelblue",
+          size = 2) +
+  labs(
+    title = "Immune Infiltration vs Gleason Score",
+    x = "Gleason Score",
+    y = "Immune Score") +
+  theme_nature()
+dev.off()
+
+## FOLH1 vs NK & CAF
+folh1 <- expr["FOLH1", colnames(expr_mat)]
+df4 <- data.frame(
+  FOLH1 = folh1,
+  NK = expr_mat["NK cell", ],
+  CAF = expr_mat["Cancer associated fibroblast", ])
+pdf(file.path(out_dir, "15_TCGA-PRAD_FOLH1vsNK_plot.pdf"), 6, 6)
+ggscatter(df4,
+          x = "FOLH1",
+          y = "NK",
+          add = "reg.line",
+          conf.int = TRUE,
+          cor.coef = TRUE,
+          cor.method = "spearman",
+          color = "#1B9E77",
+          size = 2) +
+  labs(
+    title = "FOLH1 vs NK Cell Infiltration",
+    x = "FOLH1 Expression",
+    y = "NK Cell Score") +
+  theme_nature()
+dev.off()
+pdf(file.path(out_dir, "15_TCGA-PRAD_FOLH1vsCAF_plot.pdf"), 6, 6)
+ggscatter(df4,
+          x = "FOLH1",
+          y = "CAF",
+          add = "reg.line",
+          conf.int = TRUE,
+          cor.coef = TRUE,
+          cor.method = "spearman",
+          color = "#D95F02",
+          size = 2) +
+  labs(
+    title = "FOLH1 vs Cancer-Associated Fibroblasts",
+    x = "FOLH1 Expression",
+    y = "CAF Score") +
+  theme_nature()
+dev.off()
