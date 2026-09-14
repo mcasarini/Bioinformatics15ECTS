@@ -2684,3 +2684,7983 @@ cat("====================================\n")
 cat("Results saved in:\n")
 cat(deg_trend_dir)
 cat("\n====================================\n")
+
+# ============================================================
+# 03_MTK25_GO Biological Process, KEGG 6 Reactome enrichment 
+# ENRICHMENT & BIOLOGICAL PROCESSES ANALYSIS
+# ============================================================
+suppressPackageStartupMessages({
+  
+  library(clusterProfiler)
+  library(org.Mm.eg.db)
+  
+  library(dplyr)
+  
+  library(ggplot2)
+  
+})
+
+# ============================================================
+# PATHWAY ANALYSIS
+# ============================================================
+
+outdir <- file.path(
+  "C:/Users/Martina/Desktop/New folder/results",
+  "MTK25_analysis"
+)
+pathway_dir <- file.path(
+  outdir,
+  "04_Pathway_Analysis"
+)
+
+go_dir <- file.path(
+  pathway_dir,
+  "GO_BP"
+)
+
+dir.create(
+  pathway_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+dir.create(
+  go_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+# ============================================================
+# GO BIOLOGICAL PROCESS
+# ============================================================
+
+run_go_bp <- function(
+    gene_table,
+    comparison_name,
+    output_dir
+){
+  
+  sig_genes <- gene_table %>%
+    
+    filter(
+      !is.na(ENTREZID)
+    ) %>%
+    
+    filter(
+      !is.na(padj)
+    ) %>%
+    
+    filter(
+      padj < 0.05
+    ) %>%
+    
+    distinct(
+      ENTREZID,
+      .keep_all = TRUE
+    )
+  
+  if(nrow(sig_genes) < 10){
+    
+    message(
+      comparison_name,
+      ": fewer than 10 significant genes."
+    )
+    
+    return(NULL)
+  }
+  
+  ego <- enrichGO(
+    
+    gene =
+      sig_genes$ENTREZID,
+    
+    OrgDb =
+      org.Mm.eg.db,
+    
+    keyType =
+      "ENTREZID",
+    
+    ont =
+      "BP",
+    
+    pAdjustMethod =
+      "BH",
+    
+    pvalueCutoff =
+      0.05,
+    
+    qvalueCutoff =
+      0.05,
+    
+    readable =
+      TRUE
+  )
+  
+  if(is.null(ego) || nrow(as.data.frame(ego)) == 0){
+    
+    message(
+      comparison_name,
+      ": no enriched GO terms."
+    )
+    
+    return(NULL)
+  }
+  
+  go_df <- as.data.frame(
+    ego
+  )
+  
+  write.csv(
+    
+    go_df,
+    
+    file.path(
+      
+      output_dir,
+      
+      paste0(
+        comparison_name,
+        "_GO_BP.csv"
+      )
+      
+    ),
+    
+    row.names = FALSE
+  )
+  
+  p <- dotplot(
+    
+    ego,
+    
+    showCategory = 20,
+    
+    font.size = 10
+    
+  ) +
+    
+    ggtitle(
+      
+      paste0(
+        comparison_name,
+        " GO Biological Process"
+      )
+      
+    )
+  
+  ggsave(
+    
+    file.path(
+      
+      output_dir,
+      
+      paste0(
+        comparison_name,
+        "_GO_BP_dotplot.png"
+      )
+      
+    ),
+    
+    p,
+    
+    width = 10,
+    
+    height = 8,
+    
+    dpi = 300
+  )
+  
+  return(
+    ego
+  )
+}
+
+go_KOvsWT <- run_go_bp(
+  
+  deg_genotype$all,
+  
+  "KO_vs_WT",
+  
+  go_dir
+)
+
+go_MTKvsCtrl <- run_go_bp(
+  
+  deg_treatment$all,
+  
+  "MTK_vs_Ctrl",
+  
+  go_dir
+)
+go_Interaction <- run_go_bp(
+  
+  deg_interaction$all,
+  
+  "Interaction",
+  
+  go_dir
+)
+# ============================================================
+# GO: KO vs WT within Ctrl
+# ============================================================
+
+go_KOvsWT_Ctrl <- run_go_bp(
+  
+  res_ctrl_df,
+  
+  "KO_vs_WT_within_Ctrl",
+  
+  go_dir
+)
+
+# ============================================================
+# GO: KO vs WT within MTK
+# ============================================================
+
+go_KOvsWT_MTK <- run_go_bp(
+  
+  res_mtk_df,
+  
+  "KO_vs_WT_within_MTK",
+  
+  go_dir
+)
+
+# ============================================================
+# GO: MTK vs Ctrl within WT
+# ============================================================
+
+go_WT_MTKvsCtrl <- run_go_bp(
+  
+  res_wt_df,
+  
+  "WT_MTK_vs_Ctrl",
+  
+  go_dir
+)
+
+# ============================================================
+# GO: MTK vs Ctrl within KO
+# ============================================================
+
+go_KO_MTKvsCtrl <- run_go_bp(
+  
+  res_ko_df,
+  
+  "KO_MTK_vs_Ctrl",
+  
+  go_dir
+)
+
+# ============================================================
+# GO SUMMARY
+# ============================================================
+
+go_summary <- data.frame(
+  
+  Comparison = c(
+    
+    "KO_vs_WT",
+    
+    "MTK_vs_Ctrl",
+    
+    "Interaction"
+  ),
+  
+  Significant_GO_Terms = c(
+    
+    ifelse(
+      is.null(go_KOvsWT),
+      0,
+      nrow(as.data.frame(go_KOvsWT))
+    ),
+    
+    ifelse(
+      is.null(go_MTKvsCtrl),
+      0,
+      nrow(as.data.frame(go_MTKvsCtrl))
+    ),
+    
+    ifelse(
+      is.null(go_Interaction),
+      0,
+      nrow(as.data.frame(go_Interaction))
+    )
+  )
+)
+
+write.csv(
+  
+  go_summary,
+  
+  file.path(
+    go_dir,
+    "GO_BP_Summary.csv"
+  ),
+  
+  row.names = FALSE
+)
+
+print(
+  go_summary
+)
+
+cat("\n====================================\n")
+cat("GO BIOLOGICAL PROCESS ANALYSIS COMPLETED\n")
+cat("====================================\n")
+cat(go_dir)
+cat("\n====================================\n")
+
+
+# ============================================================
+# GO BP UP/DOWN
+# ============================================================
+
+run_go_bp_up_down <- function(
+    gene_table,
+    comparison_name,
+    output_dir
+){
+  
+  dir.create(
+    output_dir,
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+  
+  # ----------------------------------------------------------
+  # UP GENES
+  # ----------------------------------------------------------
+  
+  up_genes <- gene_table %>%
+    
+    filter(
+      !is.na(ENTREZID),
+      !is.na(padj),
+      padj < 0.05,
+      log2FoldChange > 0.58
+    ) %>%
+    
+    distinct(
+      ENTREZID,
+      .keep_all = TRUE
+    )
+  
+  ego_up <- NULL
+  
+  if(nrow(up_genes) >= 10){
+    
+    ego_up <- enrichGO(
+      
+      gene =
+        up_genes$ENTREZID,
+      
+      OrgDb =
+        org.Mm.eg.db,
+      
+      keyType =
+        "ENTREZID",
+      
+      ont =
+        "BP",
+      
+      pAdjustMethod =
+        "BH",
+      
+      pvalueCutoff =
+        0.05,
+      
+      qvalueCutoff =
+        0.05,
+      
+      readable =
+        TRUE
+    )
+    
+    if(!is.null(ego_up)){
+      
+      up_df <- as.data.frame(
+        ego_up
+      )
+      
+      write.csv(
+        
+        up_df,
+        
+        file.path(
+          
+          output_dir,
+          
+          paste0(
+            comparison_name,
+            "_GO_BP_UP.csv"
+          )
+          
+        ),
+        
+        row.names = FALSE
+      )
+      
+      p_up <- dotplot(
+        
+        ego_up,
+        
+        showCategory = 20
+        
+      ) +
+        
+        ggtitle(
+          
+          paste0(
+            comparison_name,
+            " GO BP (UP)"
+          )
+          
+        )
+      
+      ggsave(
+        
+        file.path(
+          
+          output_dir,
+          
+          paste0(
+            comparison_name,
+            "_GO_BP_UP_dotplot.png"
+          )
+          
+        ),
+        
+        p_up,
+        
+        width = 10,
+        
+        height = 8,
+        
+        dpi = 300
+      )
+    }
+  }
+  
+  # ----------------------------------------------------------
+  # DOWN GENES
+  # ----------------------------------------------------------
+  
+  down_genes <- gene_table %>%
+    
+    filter(
+      !is.na(ENTREZID),
+      !is.na(padj),
+      padj < 0.05,
+      log2FoldChange < -0.58
+    ) %>%
+    
+    distinct(
+      ENTREZID,
+      .keep_all = TRUE
+    )
+  
+  ego_down <- NULL
+  
+  if(nrow(down_genes) >= 10){
+    
+    ego_down <- enrichGO(
+      
+      gene =
+        down_genes$ENTREZID,
+      
+      OrgDb =
+        org.Mm.eg.db,
+      
+      keyType =
+        "ENTREZID",
+      
+      ont =
+        "BP",
+      
+      pAdjustMethod =
+        "BH",
+      
+      pvalueCutoff =
+        0.05,
+      
+      qvalueCutoff =
+        0.05,
+      
+      readable =
+        TRUE
+    )
+    
+    if(!is.null(ego_down)){
+      
+      down_df <- as.data.frame(
+        ego_down
+      )
+      
+      write.csv(
+        
+        down_df,
+        
+        file.path(
+          
+          output_dir,
+          
+          paste0(
+            comparison_name,
+            "_GO_BP_DOWN.csv"
+          )
+          
+        ),
+        
+        row.names = FALSE
+      )
+      
+      p_down <- dotplot(
+        
+        ego_down,
+        
+        showCategory = 20
+        
+      ) +
+        
+        ggtitle(
+          
+          paste0(
+            comparison_name,
+            " GO BP (DOWN)"
+          )
+          
+        )
+      
+      ggsave(
+        
+        file.path(
+          
+          output_dir,
+          
+          paste0(
+            comparison_name,
+            "_GO_BP_DOWN_dotplot.png"
+          )
+          
+        ),
+        
+        p_down,
+        
+        width = 10,
+        
+        height = 8,
+        
+        dpi = 300
+      )
+    }
+  }
+  
+  return(
+    
+    list(
+      
+      up = ego_up,
+      
+      down = ego_down
+    )
+  )
+}
+
+go_KOvsWT <- run_go_bp_up_down(
+  deg_genotype$all,
+  "KO_vs_WT",
+  go_dir
+)
+
+go_MTKvsCtrl <- run_go_bp_up_down(
+  deg_treatment$all,
+  "MTK_vs_Ctrl",
+  go_dir
+)
+
+go_Interaction <- run_go_bp_up_down(
+  deg_interaction$all,
+  "Interaction",
+  go_dir
+)
+
+go_KOvsWT_Ctrl <- run_go_bp_up_down(
+  res_ctrl_df,
+  "KO_vs_WT_within_Ctrl",
+  go_dir
+)
+
+go_KOvsWT_MTK <- run_go_bp_up_down(
+  res_mtk_df,
+  "KO_vs_WT_within_MTK",
+  go_dir
+)
+
+go_WT_MTKvsCtrl <- run_go_bp_up_down(
+  res_wt_df,
+  "WT_MTK_vs_Ctrl",
+  go_dir
+)
+
+go_KO_MTKvsCtrl <- run_go_bp_up_down(
+  res_ko_df,
+  "KO_MTK_vs_Ctrl",
+  go_dir
+)
+
+# ============================================================
+# KEGG UP / DOWN
+# ============================================================
+
+run_kegg_up_down <- function(
+    gene_table,
+    comparison_name,
+    output_dir
+){
+  
+  dir.create(
+    output_dir,
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+  
+  ekegg_up <- NULL
+  ekegg_down <- NULL
+  
+  # ----------------------------------------------------------
+  # UP GENES
+  # ----------------------------------------------------------
+  
+  up_genes <- gene_table %>%
+    
+    filter(
+      !is.na(ENTREZID),
+      !is.na(padj),
+      padj < 0.05,
+      log2FoldChange > 0.58
+    ) %>%
+    
+    distinct(
+      ENTREZID,
+      .keep_all = TRUE
+    )
+  
+  if(nrow(up_genes) >= 10){
+    
+    ekegg_up <- enrichKEGG(
+      
+      gene = up_genes$ENTREZID,
+      
+      organism = "mmu",
+      
+      pvalueCutoff = 0.05
+    )
+    
+    if(
+      !is.null(ekegg_up) &&
+      nrow(as.data.frame(ekegg_up)) > 0
+    ){
+      
+      write.csv(
+        
+        as.data.frame(ekegg_up),
+        
+        file.path(
+          
+          output_dir,
+          
+          paste0(
+            comparison_name,
+            "_KEGG_UP.csv"
+          )
+          
+        ),
+        
+        row.names = FALSE
+      )
+      
+      p_up <- dotplot(
+        
+        ekegg_up,
+        
+        showCategory = 20
+        
+      ) +
+        
+        ggtitle(
+          paste0(
+            comparison_name,
+            " KEGG (UP)"
+          )
+        )
+      
+      ggsave(
+        
+        file.path(
+          
+          output_dir,
+          
+          paste0(
+            comparison_name,
+            "_KEGG_UP_dotplot.png"
+          )
+          
+        ),
+        
+        p_up,
+        
+        width = 10,
+        
+        height = 8,
+        
+        dpi = 300
+      )
+    }
+  }
+  
+  # ----------------------------------------------------------
+  # DOWN GENES
+  # ----------------------------------------------------------
+  
+  down_genes <- gene_table %>%
+    
+    filter(
+      !is.na(ENTREZID),
+      !is.na(padj),
+      padj < 0.05,
+      log2FoldChange < -0.58
+    ) %>%
+    
+    distinct(
+      ENTREZID,
+      .keep_all = TRUE
+    )
+  
+  if(nrow(down_genes) >= 10){
+    
+    ekegg_down <- enrichKEGG(
+      
+      gene = down_genes$ENTREZID,
+      
+      organism = "mmu",
+      
+      pvalueCutoff = 0.05
+    )
+    
+    if(
+      !is.null(ekegg_down) &&
+      nrow(as.data.frame(ekegg_down)) > 0
+    ){
+      
+      write.csv(
+        
+        as.data.frame(ekegg_down),
+        
+        file.path(
+          
+          output_dir,
+          
+          paste0(
+            comparison_name,
+            "_KEGG_DOWN.csv"
+          )
+          
+        ),
+        
+        row.names = FALSE
+      )
+      
+      p_down <- dotplot(
+        
+        ekegg_down,
+        
+        showCategory = 20
+        
+      ) +
+        
+        ggtitle(
+          paste0(
+            comparison_name,
+            " KEGG (DOWN)"
+          )
+        )
+      
+      ggsave(
+        
+        file.path(
+          
+          output_dir,
+          
+          paste0(
+            comparison_name,
+            "_KEGG_DOWN_dotplot.png"
+          )
+          
+        ),
+        
+        p_down,
+        
+        width = 10,
+        
+        height = 8,
+        
+        dpi = 300
+      )
+    }
+  }
+  
+  return(
+    
+    list(
+      
+      up = ekegg_up,
+      
+      down = ekegg_down
+      
+    )
+  )
+}
+kegg_KOvsWT <- run_kegg_up_down(
+  deg_genotype$all,
+  "KO_vs_WT",
+  kegg_dir
+)
+
+kegg_MTKvsCtrl <- run_kegg_up_down(
+  deg_treatment$all,
+  "MTK_vs_Ctrl",
+  kegg_dir
+)
+
+kegg_Interaction <- run_kegg_up_down(
+  deg_interaction$all,
+  "Interaction",
+  kegg_dir
+)
+
+kegg_KOvsWT_Ctrl <- run_kegg_up_down(
+  res_ctrl_df,
+  "KO_vs_WT_within_Ctrl",
+  kegg_dir
+)
+
+kegg_KOvsWT_MTK <- run_kegg_up_down(
+  res_mtk_df,
+  "KO_vs_WT_within_MTK",
+  kegg_dir
+)
+
+kegg_WT_MTKvsCtrl <- run_kegg_up_down(
+  res_wt_df,
+  "WT_MTK_vs_Ctrl",
+  kegg_dir
+)
+
+kegg_KO_MTKvsCtrl <- run_kegg_up_down(
+  res_ko_df,
+  "KO_MTK_vs_Ctrl",
+  kegg_dir
+)
+
+# ============================================================
+# REACTOME UP / DOWN
+# ============================================================
+
+run_reactome_up_down <- function(
+    gene_table,
+    comparison_name,
+    output_dir
+){
+  
+  dir.create(
+    output_dir,
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+  
+  react_up <- NULL
+  react_down <- NULL
+  
+  # ----------------------------------------------------------
+  # UP GENES
+  # ----------------------------------------------------------
+  
+  up_genes <- gene_table %>%
+    
+    filter(
+      !is.na(ENTREZID),
+      !is.na(padj),
+      padj < 0.05,
+      log2FoldChange > 0.58
+    ) %>%
+    
+    distinct(
+      ENTREZID,
+      .keep_all = TRUE
+    )
+  
+  if(nrow(up_genes) >= 10){
+    
+    react_up <- enrichPathway(
+      
+      gene = up_genes$ENTREZID,
+      
+      organism = "mouse",
+      
+      pvalueCutoff = 0.05,
+      
+      readable = TRUE
+    )
+    
+    if(
+      !is.null(react_up) &&
+      nrow(as.data.frame(react_up)) > 0
+    ){
+      
+      write.csv(
+        
+        as.data.frame(react_up),
+        
+        file.path(
+          
+          output_dir,
+          
+          paste0(
+            comparison_name,
+            "_Reactome_UP.csv"
+          )
+          
+        ),
+        
+        row.names = FALSE
+      )
+      
+      p_up <- dotplot(
+        
+        react_up,
+        
+        showCategory = 20
+        
+      ) +
+        
+        ggtitle(
+          paste0(
+            comparison_name,
+            " Reactome (UP)"
+          )
+        )
+      
+      ggsave(
+        
+        file.path(
+          
+          output_dir,
+          
+          paste0(
+            comparison_name,
+            "_Reactome_UP_dotplot.png"
+          )
+          
+        ),
+        
+        p_up,
+        
+        width = 10,
+        
+        height = 8,
+        
+        dpi = 300
+      )
+    }
+  }
+  
+  # ----------------------------------------------------------
+  # DOWN GENES
+  # ----------------------------------------------------------
+  
+  down_genes <- gene_table %>%
+    
+    filter(
+      !is.na(ENTREZID),
+      !is.na(padj),
+      padj < 0.05,
+      log2FoldChange < -0.58
+    ) %>%
+    
+    distinct(
+      ENTREZID,
+      .keep_all = TRUE
+    )
+  
+  if(nrow(down_genes) >= 10){
+    
+    react_down <- enrichPathway(
+      
+      gene = down_genes$ENTREZID,
+      
+      organism = "mouse",
+      
+      pvalueCutoff = 0.05,
+      
+      readable = TRUE
+    )
+    
+    if(
+      !is.null(react_down) &&
+      nrow(as.data.frame(react_down)) > 0
+    ){
+      
+      write.csv(
+        
+        as.data.frame(react_down),
+        
+        file.path(
+          
+          output_dir,
+          
+          paste0(
+            comparison_name,
+            "_Reactome_DOWN.csv"
+          )
+          
+        ),
+        
+        row.names = FALSE
+      )
+      
+      p_down <- dotplot(
+        
+        react_down,
+        
+        showCategory = 20
+        
+      ) +
+        
+        ggtitle(
+          paste0(
+            comparison_name,
+            " Reactome (DOWN)"
+          )
+        )
+      
+      ggsave(
+        
+        file.path(
+          
+          output_dir,
+          
+          paste0(
+            comparison_name,
+            "_Reactome_DOWN_dotplot.png"
+          )
+          
+        ),
+        
+        p_down,
+        
+        width = 10,
+        
+        height = 8,
+        
+        dpi = 300
+      )
+    }
+  }
+  
+  return(
+    
+    list(
+      
+      up = react_up,
+      
+      down = react_down
+      
+    )
+  )
+}
+
+reactome_KOvsWT <- run_reactome_up_down(
+  deg_genotype$all,
+  "KO_vs_WT",
+  reactome_dir
+)
+
+reactome_MTKvsCtrl <- run_reactome_up_down(
+  deg_treatment$all,
+  "MTK_vs_Ctrl",
+  reactome_dir
+)
+
+reactome_Interaction <- run_reactome_up_down(
+  deg_interaction$all,
+  "Interaction",
+  reactome_dir
+)
+
+reactome_KOvsWT_Ctrl <- run_reactome_up_down(
+  res_ctrl_df,
+  "KO_vs_WT_within_Ctrl",
+  reactome_dir
+)
+
+reactome_KOvsWT_MTK <- run_reactome_up_down(
+  res_mtk_df,
+  "KO_vs_WT_within_MTK",
+  reactome_dir
+)
+
+reactome_WT_MTKvsCtrl <- run_reactome_up_down(
+  res_wt_df,
+  "WT_MTK_vs_Ctrl",
+  reactome_dir
+)
+
+reactome_KO_MTKvsCtrl <- run_reactome_up_down(
+  res_ko_df,
+  "KO_MTK_vs_Ctrl",
+  reactome_dir
+)
+
+# ============================================================
+# GO SUMMARY
+# ============================================================
+
+suppressPackageStartupMessages({
+  
+  library(dplyr)
+  library(openxlsx)
+  
+})
+
+# ============================================================
+# HELPER FUNCTIONS
+# ============================================================
+
+count_terms <- function(x){
+  
+  if(is.null(x))
+    return(0)
+  
+  df <- tryCatch(
+    as.data.frame(x),
+    error = function(e) NULL
+  )
+  
+  if(is.null(df))
+    return(0)
+  
+  nrow(df)
+}
+
+extract_top_term <- function(x){
+  
+  if(is.null(x))
+    return(NA)
+  
+  df <- tryCatch(
+    as.data.frame(x),
+    error = function(e) NULL
+  )
+  
+  if(is.null(df))
+    return(NA)
+  
+  if(nrow(df) == 0)
+    return(NA)
+  
+  df$Description[1]
+}
+
+# ============================================================
+# GO SUMMARY
+# ============================================================
+deg_summary <- data.frame(
+  
+  Comparison = c(
+    "KO_vs_WT",
+    "MTK_vs_Ctrl",
+    "Interaction",
+    "KO_vs_WT_within_Ctrl",
+    "KO_vs_WT_within_MTK",
+    "WT_MTK_vs_Ctrl",
+    "KO_MTK_vs_Ctrl"
+  ),
+  
+  Up_Genes = c(
+    
+    sum(deg_genotype$all$padj < 0.05 &
+          deg_genotype$all$log2FoldChange > 0.58,
+        na.rm = TRUE),
+    
+    sum(deg_treatment$all$padj < 0.05 &
+          deg_treatment$all$log2FoldChange > 0.58,
+        na.rm = TRUE),
+    
+    sum(deg_interaction$all$padj < 0.05 &
+          deg_interaction$all$log2FoldChange > 0.58,
+        na.rm = TRUE),
+    
+    sum(res_ctrl_df$padj < 0.05 &
+          res_ctrl_df$log2FoldChange > 0.58,
+        na.rm = TRUE),
+    
+    sum(res_mtk_df$padj < 0.05 &
+          res_mtk_df$log2FoldChange > 0.58,
+        na.rm = TRUE),
+    
+    sum(res_wt_df$padj < 0.05 &
+          res_wt_df$log2FoldChange > 0.58,
+        na.rm = TRUE),
+    
+    sum(res_ko_df$padj < 0.05 &
+          res_ko_df$log2FoldChange > 0.58,
+        na.rm = TRUE)
+  ),
+  
+  Down_Genes = c(
+    
+    sum(deg_genotype$all$padj < 0.05 &
+          deg_genotype$all$log2FoldChange < -0.58,
+        na.rm = TRUE),
+    
+    sum(deg_treatment$all$padj < 0.05 &
+          deg_treatment$all$log2FoldChange < -0.58,
+        na.rm = TRUE),
+    
+    sum(deg_interaction$all$padj < 0.05 &
+          deg_interaction$all$log2FoldChange < -0.58,
+        na.rm = TRUE),
+    
+    sum(res_ctrl_df$padj < 0.05 &
+          res_ctrl_df$log2FoldChange < -0.58,
+        na.rm = TRUE),
+    
+    sum(res_mtk_df$padj < 0.05 &
+          res_mtk_df$log2FoldChange < -0.58,
+        na.rm = TRUE),
+    
+    sum(res_wt_df$padj < 0.05 &
+          res_wt_df$log2FoldChange < -0.58,
+        na.rm = TRUE),
+    
+    sum(res_ko_df$padj < 0.05 &
+          res_ko_df$log2FoldChange < -0.58,
+        na.rm = TRUE)
+  )
+)
+
+go_summary <- data.frame(
+  
+  Comparison = c(
+    
+    "KO_vs_WT",
+    
+    "MTK_vs_Ctrl",
+    
+    "Interaction",
+    
+    "KO_vs_WT_within_Ctrl",
+    
+    "KO_vs_WT_within_MTK",
+    
+    "WT_MTK_vs_Ctrl",
+    
+    "KO_MTK_vs_Ctrl"
+  ),
+  
+  GO_UP = c(
+    
+    count_terms(go_KOvsWT$up),
+    count_terms(go_MTKvsCtrl$up),
+    count_terms(go_Interaction$up),
+    count_terms(go_KOvsWT_Ctrl$up),
+    count_terms(go_KOvsWT_MTK$up),
+    count_terms(go_WT_MTKvsCtrl$up),
+    count_terms(go_KO_MTKvsCtrl$up)
+    
+  ),
+  
+  GO_DOWN = c(
+    
+    count_terms(go_KOvsWT$down),
+    count_terms(go_MTKvsCtrl$down),
+    count_terms(go_Interaction$down),
+    count_terms(go_KOvsWT_Ctrl$down),
+    count_terms(go_KOvsWT_MTK$down),
+    count_terms(go_WT_MTKvsCtrl$down),
+    count_terms(go_KO_MTKvsCtrl$down)
+    
+  )
+)
+
+write.csv(
+  
+  go_summary,
+  
+  file.path(
+    go_dir,
+    "GO_BP_Summary.csv"
+  ),
+  
+  row.names = FALSE
+)
+
+# ============================================================
+# KEGG SUMMARY
+# ============================================================
+
+kegg_summary <- data.frame(
+  
+  Comparison =
+    go_summary$Comparison,
+  
+  KEGG_UP = c(
+    
+    count_terms(kegg_KOvsWT$up),
+    count_terms(kegg_MTKvsCtrl$up),
+    count_terms(kegg_Interaction$up),
+    count_terms(kegg_KOvsWT_Ctrl$up),
+    count_terms(kegg_KOvsWT_MTK$up),
+    count_terms(kegg_WT_MTKvsCtrl$up),
+    count_terms(kegg_KO_MTKvsCtrl$up)
+    
+  ),
+  
+  KEGG_DOWN = c(
+    
+    count_terms(kegg_KOvsWT$down),
+    count_terms(kegg_MTKvsCtrl$down),
+    count_terms(kegg_Interaction$down),
+    count_terms(kegg_KOvsWT_Ctrl$down),
+    count_terms(kegg_KOvsWT_MTK$down),
+    count_terms(kegg_WT_MTKvsCtrl$down),
+    count_terms(kegg_KO_MTKvsCtrl$down)
+    
+  )
+)
+
+write.csv(
+  
+  kegg_summary,
+  
+  file.path(
+    kegg_dir,
+    "KEGG_Summary.csv"
+  ),
+  
+  row.names = FALSE
+)
+
+# ============================================================
+# REACTOME SUMMARY
+# ============================================================
+
+reactome_summary <- data.frame(
+  
+  Comparison =
+    go_summary$Comparison,
+  
+  Reactome_UP = c(
+    
+    count_terms(reactome_KOvsWT$up),
+    count_terms(reactome_MTKvsCtrl$up),
+    count_terms(reactome_Interaction$up),
+    count_terms(reactome_KOvsWT_Ctrl$up),
+    count_terms(reactome_KOvsWT_MTK$up),
+    count_terms(reactome_WT_MTKvsCtrl$up),
+    count_terms(reactome_KO_MTKvsCtrl$up)
+    
+  ),
+  
+  Reactome_DOWN = c(
+    
+    count_terms(reactome_KOvsWT$down),
+    count_terms(reactome_MTKvsCtrl$down),
+    count_terms(reactome_Interaction$down),
+    count_terms(reactome_KOvsWT_Ctrl$down),
+    count_terms(reactome_KOvsWT_MTK$down),
+    count_terms(reactome_WT_MTKvsCtrl$down),
+    count_terms(reactome_KO_MTKvsCtrl$down)
+    
+  )
+)
+
+write.csv(
+  
+  reactome_summary,
+  
+  file.path(
+    reactome_dir,
+    "Reactome_Summary.csv"
+  ),
+  
+  row.names = FALSE
+)
+
+# ============================================================
+# MASTER SUMMARY
+# ============================================================
+
+master_pathway_summary <- go_summary %>%
+  
+  left_join(
+    kegg_summary,
+    by = "Comparison"
+  ) %>%
+  
+  left_join(
+    reactome_summary,
+    by = "Comparison"
+  )
+
+write.csv(
+  
+  master_pathway_summary,
+  
+  file.path(
+    pathway_dir,
+    "Master_Pathway_Summary.csv"
+  ),
+  
+  row.names = FALSE
+)
+
+master_pathway_summary <- deg_summary %>%
+  
+  left_join(
+    go_summary,
+    by = "Comparison"
+  ) %>%
+  
+  left_join(
+    kegg_summary,
+    by = "Comparison"
+  ) %>%
+  
+  left_join(
+    reactome_summary,
+    by = "Comparison"
+  )
+
+# ============================================================
+# TOP PATHWAYS
+# ============================================================
+
+top_pathways <- data.frame(
+  
+  Comparison =
+    go_summary$Comparison,
+  
+  Top_GO_UP = c(
+    
+    extract_top_term(go_KOvsWT$up),
+    extract_top_term(go_MTKvsCtrl$up),
+    extract_top_term(go_Interaction$up),
+    extract_top_term(go_KOvsWT_Ctrl$up),
+    extract_top_term(go_KOvsWT_MTK$up),
+    extract_top_term(go_WT_MTKvsCtrl$up),
+    extract_top_term(go_KO_MTKvsCtrl$up)
+    
+  ),
+  
+  Top_GO_DOWN = c(
+    
+    extract_top_term(go_KOvsWT$down),
+    extract_top_term(go_MTKvsCtrl$down),
+    extract_top_term(go_Interaction$down),
+    extract_top_term(go_KOvsWT_Ctrl$down),
+    extract_top_term(go_KOvsWT_MTK$down),
+    extract_top_term(go_WT_MTKvsCtrl$down),
+    extract_top_term(go_KO_MTKvsCtrl$down)
+    
+  ),
+  
+  Top_KEGG_UP = c(
+    
+    extract_top_term(kegg_KOvsWT$up),
+    extract_top_term(kegg_MTKvsCtrl$up),
+    extract_top_term(kegg_Interaction$up),
+    extract_top_term(kegg_KOvsWT_Ctrl$up),
+    extract_top_term(kegg_KOvsWT_MTK$up),
+    extract_top_term(kegg_WT_MTKvsCtrl$up),
+    extract_top_term(kegg_KO_MTKvsCtrl$up)
+    
+  ),
+  
+  Top_KEGG_DOWN = c(
+    
+    extract_top_term(kegg_KOvsWT$down),
+    extract_top_term(kegg_MTKvsCtrl$down),
+    extract_top_term(kegg_Interaction$down),
+    extract_top_term(kegg_KOvsWT_Ctrl$down),
+    extract_top_term(kegg_KOvsWT_MTK$down),
+    extract_top_term(kegg_WT_MTKvsCtrl$down),
+    extract_top_term(kegg_KO_MTKvsCtrl$down)
+    
+  ),
+  
+  Top_Reactome_UP = c(
+    
+    extract_top_term(reactome_KOvsWT$up),
+    extract_top_term(reactome_MTKvsCtrl$up),
+    extract_top_term(reactome_Interaction$up),
+    extract_top_term(reactome_KOvsWT_Ctrl$up),
+    extract_top_term(reactome_KOvsWT_MTK$up),
+    extract_top_term(reactome_WT_MTKvsCtrl$up),
+    extract_top_term(reactome_KO_MTKvsCtrl$up)
+    
+  ),
+  
+  Top_Reactome_DOWN = c(
+    
+    extract_top_term(reactome_KOvsWT$down),
+    extract_top_term(reactome_MTKvsCtrl$down),
+    extract_top_term(reactome_Interaction$down),
+    extract_top_term(reactome_KOvsWT_Ctrl$down),
+    extract_top_term(reactome_KOvsWT_MTK$down),
+    extract_top_term(reactome_WT_MTKvsCtrl$down),
+    extract_top_term(reactome_KO_MTKvsCtrl$down)
+    
+  )
+)
+
+write.csv(
+  
+  top_pathways,
+  
+  file.path(
+    pathway_dir,
+    "Top_Pathways.csv"
+  ),
+  
+  row.names = FALSE
+)
+
+# ============================================================
+# EXCEL REPORT
+# ============================================================
+
+wb <- createWorkbook()
+
+addWorksheet(
+  wb,
+  "Master_Summary"
+)
+
+writeData(
+  wb,
+  "Master_Summary",
+  master_pathway_summary
+)
+
+addWorksheet(
+  wb,
+  "Top_Pathways"
+)
+
+writeData(
+  wb,
+  "Top_Pathways",
+  top_pathways
+)
+
+addWorksheet(
+  wb,
+  "GO_Summary"
+)
+
+writeData(
+  wb,
+  "GO_Summary",
+  go_summary
+)
+
+addWorksheet(
+  wb,
+  "KEGG_Summary"
+)
+
+writeData(
+  wb,
+  "KEGG_Summary",
+  kegg_summary
+)
+
+addWorksheet(
+  wb,
+  "Reactome_Summary"
+)
+
+writeData(
+  wb,
+  "Reactome_Summary",
+  reactome_summary
+)
+
+saveWorkbook(
+  
+  wb,
+  
+  file.path(
+    pathway_dir,
+    "MTK25_Pathway_Report.xlsx"
+  ),
+  
+  overwrite = TRUE
+)
+
+# ============================================================
+# FINAL REPORT
+# ============================================================
+
+print(master_pathway_summary)
+
+cat("\n====================================\n")
+cat("PATHWAY ANALYSIS SUMMARY COMPLETED\n")
+cat("====================================\n")
+cat(pathway_dir)
+cat("\n====================================\n")
+# ============================================================
+# 05_MTK25_GSEAHallmark
+# GSEA HALLMARK ANALYSIS
+# ============================================================
+
+suppressPackageStartupMessages({
+  
+  library(clusterProfiler)
+  
+  library(msigdbr)
+  
+  library(enrichplot)
+  
+  library(dplyr)
+  
+  library(ggplot2)
+  
+  library(openxlsx)
+  
+})
+
+# ============================================================
+# DIRECTORIES
+# ============================================================
+
+gsea_dir <- file.path(
+  outdir,
+  "05_GSEA"
+)
+
+hallmark_dir <- file.path(
+  gsea_dir,
+  "Hallmark"
+)
+
+dir.create(
+  gsea_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+dir.create(
+  hallmark_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+# load
+outdir <- file.path(
+  "C:/Users/Martina/Desktop/New folder/results",
+  "MTK25_analysis"
+)
+load(
+  file.path(
+    outdir,
+    "MTK25_DEG_objects.RData"
+  )
+)
+
+# ============================================================
+# MSIGDB HALLMARK
+# ============================================================
+
+hallmark_db <- msigdbr(
+  
+  species = "Mus musculus",
+  
+  category = "H"
+)
+
+hallmark_sets <- hallmark_db %>%
+  
+  select(
+    gs_name,
+    entrez_gene
+  )
+
+# ============================================================
+# RUN HALLMARK GSEA
+# ============================================================
+
+run_hallmark_gsea <- function(
+    gene_table,
+    comparison_name,
+    output_dir
+){
+  
+  ranked_genes <- gene_table %>%
+    
+    filter(
+      !is.na(ENTREZID)
+    ) %>%
+    
+    filter(
+      !is.na(log2FoldChange)
+    ) %>%
+    
+    group_by(
+      ENTREZID
+    ) %>%
+    
+    slice(1) %>%
+    
+    ungroup()
+  
+  gene_list <- ranked_genes$log2FoldChange
+  
+  names(gene_list) <-
+    ranked_genes$ENTREZID
+  
+  gene_list <- sort(
+    gene_list,
+    decreasing = TRUE
+  )
+  
+  gsea_res <- GSEA(
+    
+    geneList = gene_list,
+    
+    TERM2GENE = hallmark_sets,
+    
+    pvalueCutoff = 0.05,
+    
+    verbose = FALSE
+  )
+  
+  if(
+    is.null(gsea_res) ||
+    nrow(as.data.frame(gsea_res)) == 0
+  ){
+    
+    message(
+      comparison_name,
+      ": no Hallmark enrichment"
+    )
+    
+    return(NULL)
+  }
+  
+  gsea_df <- as.data.frame(
+    gsea_res
+  )
+  
+  write.csv(
+    
+    gsea_df,
+    
+    file.path(
+      
+      output_dir,
+      
+      paste0(
+        comparison_name,
+        "_Hallmark_GSEA.csv"
+      )
+      
+    ),
+    
+    row.names = FALSE
+  )
+  
+  # ---------------------------------------------------------
+  # DOTPLOT
+  # ---------------------------------------------------------
+  
+  p1 <- dotplot(
+    
+    gsea_res,
+    
+    showCategory = 20
+    
+  ) +
+    
+    ggtitle(
+      
+      paste0(
+        comparison_name,
+        " Hallmark GSEA"
+      )
+      
+    )
+  
+  ggsave(
+    
+    file.path(
+      
+      output_dir,
+      
+      paste0(
+        comparison_name,
+        "_Hallmark_dotplot.png"
+      )
+      
+    ),
+    
+    p1,
+    
+    width = 10,
+    
+    height = 8,
+    
+    dpi = 300
+  )
+  
+  # ---------------------------------------------------------
+  # RIDGEPLOT
+  # ---------------------------------------------------------
+  
+  p2 <- ridgeplot(
+    gsea_res
+  )
+  
+  ggsave(
+    
+    file.path(
+      
+      output_dir,
+      
+      paste0(
+        comparison_name,
+        "_Hallmark_ridgeplot.png"
+      )
+      
+    ),
+    
+    p2,
+    
+    width = 12,
+    
+    height = 8,
+    
+    dpi = 300
+  )
+  
+  return(gsea_res)
+}
+
+gsea_KOvsWT <- run_hallmark_gsea(
+  
+  deg_genotype$all,
+  
+  "KO_vs_WT",
+  
+  hallmark_dir
+)
+
+gsea_MTKvsCtrl <- run_hallmark_gsea(
+  
+  deg_treatment$all,
+  
+  "MTK_vs_Ctrl",
+  
+  hallmark_dir
+)
+
+gsea_Interaction <- run_hallmark_gsea(
+  
+  deg_interaction$all,
+  
+  "Interaction",
+  
+  hallmark_dir
+)
+
+gsea_KOvsWT_Ctrl <- run_hallmark_gsea(
+  
+  res_ctrl_df,
+  
+  "KO_vs_WT_within_Ctrl",
+  
+  hallmark_dir
+)
+
+gsea_KOvsWT_MTK <- run_hallmark_gsea(
+  
+  res_mtk_df,
+  
+  "KO_vs_WT_within_MTK",
+  
+  hallmark_dir
+)
+
+gsea_WT_MTKvsCtrl <- run_hallmark_gsea(
+  
+  res_wt_df,
+  
+  "WT_MTK_vs_Ctrl",
+  
+  hallmark_dir
+)
+
+gsea_KO_MTKvsCtrl <- run_hallmark_gsea(
+  
+  res_ko_df,
+  
+  "KO_MTK_vs_Ctrl",
+  
+  hallmark_dir
+)
+
+count_gsea_terms <- function(x){
+  
+  if(is.null(x))
+    return(0)
+  
+  nrow(
+    as.data.frame(x)
+  )
+}
+
+top_gsea_term <- function(x){
+  
+  if(is.null(x))
+    return(NA)
+  
+  df <- as.data.frame(x)
+  
+  if(nrow(df) == 0)
+    return(NA)
+  
+  df$Description[1]
+}
+
+gsea_summary <- data.frame(
+  
+  Comparison = c(
+    
+    "KO_vs_WT",
+    
+    "MTK_vs_Ctrl",
+    
+    "Interaction",
+    
+    "KO_vs_WT_within_Ctrl",
+    
+    "KO_vs_WT_within_MTK",
+    
+    "WT_MTK_vs_Ctrl",
+    
+    "KO_MTK_vs_Ctrl"
+  ),
+  
+  Significant_Hallmarks = c(
+    
+    count_gsea_terms(gsea_KOvsWT),
+    
+    count_gsea_terms(gsea_MTKvsCtrl),
+    
+    count_gsea_terms(gsea_Interaction),
+    
+    count_gsea_terms(gsea_KOvsWT_Ctrl),
+    
+    count_gsea_terms(gsea_KOvsWT_MTK),
+    
+    count_gsea_terms(gsea_WT_MTKvsCtrl),
+    
+    count_gsea_terms(gsea_KO_MTKvsCtrl)
+  ),
+  
+  Top_Hallmark = c(
+    
+    top_gsea_term(gsea_KOvsWT),
+    
+    top_gsea_term(gsea_MTKvsCtrl),
+    
+    top_gsea_term(gsea_Interaction),
+    
+    top_gsea_term(gsea_KOvsWT_Ctrl),
+    
+    top_gsea_term(gsea_KOvsWT_MTK),
+    
+    top_gsea_term(gsea_WT_MTKvsCtrl),
+    
+    top_gsea_term(gsea_KO_MTKvsCtrl)
+  )
+)
+
+write.csv(
+  
+  gsea_summary,
+  
+  file.path(
+    hallmark_dir,
+    "GSEA_Summary.csv"
+  ),
+  
+  row.names = FALSE
+)
+
+print(
+  gsea_summary
+)
+
+wb <- createWorkbook()
+
+addWorksheet(
+  wb,
+  "Hallmark_GSEA_Summary"
+)
+
+writeData(
+  
+  wb,
+  
+  "Hallmark_GSEA_Summary",
+  
+  gsea_summary
+)
+
+saveWorkbook(
+  
+  wb,
+  
+  file.path(
+    
+    hallmark_dir,
+    
+    "MTK25_Hallmark_GSEA_Report.xlsx"
+  ),
+  
+  overwrite = TRUE
+)
+
+cat("\n====================================\n")
+cat("HALLMARK GSEA COMPLETED\n")
+cat("====================================\n")
+cat(hallmark_dir)
+cat("\n====================================\n")
+
+# ============================================================
+# 06_MTK25_PINK1_BIOMARKER_CORRELATION
+# ============================================================
+#
+# Objective:
+# Evaluate Pearson correlations between PINK1 expression
+# and predefined biomarker genes across:
+#
+#   1. All samples
+#   2. WT_Ctrl
+#   3. WT_MTK
+#   4. KO_Ctrl
+#   5. KO_MTK
+#
+# Outputs:
+#   - Correlation tables
+#   - FDR-adjusted p-values
+#   - Top positive/negative biomarkers
+#   - Correlation barplots
+#   - Heatmaps
+#   - Scatterplots
+#   - Excel report
+#
+# Required objects:
+#   vst_mat
+#   sample_info
+#   biomarkers
+#   outdir
+#
+# ============================================================
+
+suppressPackageStartupMessages({
+  
+  library(dplyr)
+  library(ggplot2)
+  library(pheatmap)
+  library(openxlsx)
+  library(tibble)
+  
+})
+
+# ============================================================
+# OUTPUT DIRECTORY
+# ============================================================
+
+corr_dir <- file.path(
+  outdir,
+  "06_Pink1_Correlations"
+)
+
+dir.create(
+  corr_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+# ============================================================
+# VALIDATION
+# ============================================================
+
+required_objects <- c(
+  "vst_mat",
+  "sample_info",
+  "biomarkers",
+  "outdir"
+)
+
+missing_objects <- required_objects[
+  !sapply(required_objects, exists)
+]
+
+if(length(missing_objects) > 0){
+  
+  stop(
+    paste(
+      "Missing required objects:",
+      paste(
+        missing_objects,
+        collapse = ", "
+      )
+    )
+  )
+  
+}
+
+if(!all(sample_info$SampleID %in% colnames(vst_mat))){
+  
+  stop(
+    "Not all SampleID values are present in vst_mat."
+  )
+  
+}
+
+# ============================================================
+# IDENTIFY PINK1
+# ============================================================
+
+pink1_gene <- rownames(vst_mat)[
+  toupper(rownames(vst_mat)) == "PINK1"
+]
+
+if(length(pink1_gene) == 0){
+  
+  stop(
+    "PINK1 not found in vst_mat."
+  )
+  
+}
+
+pink1_gene <- pink1_gene[1]
+
+message(
+  "Using PINK1 identifier: ",
+  pink1_gene
+)
+
+# ============================================================
+# IDENTIFY AVAILABLE BIOMARKERS
+# ============================================================
+
+gene_lookup <- tibble(
+  
+  gene_original = rownames(vst_mat),
+  
+  gene_upper = toupper(
+    rownames(vst_mat)
+  )
+  
+)
+
+present_biomarkers <- gene_lookup$gene_original[
+  match(
+    toupper(biomarkers),
+    gene_lookup$gene_upper
+  )
+]
+
+present_biomarkers <- unique(
+  present_biomarkers[!is.na(present_biomarkers)]
+)
+
+present_biomarkers <- setdiff(
+  present_biomarkers,
+  pink1_gene
+)
+
+if(length(present_biomarkers) == 0){
+  
+  stop(
+    "No biomarker genes detected."
+  )
+  
+}
+
+message(
+  "Detected biomarkers: ",
+  length(present_biomarkers)
+)
+
+# ============================================================
+# CORRELATION ENGINE
+# ============================================================
+
+calculate_correlations <- function(
+    pink1_expr,
+    expression_matrix,
+    genes
+){
+  
+  results <- lapply(
+    
+    genes,
+    
+    function(gene){
+      
+      gene_expr <- as.numeric(
+        expression_matrix[gene, ]
+      )
+      
+      valid <- complete.cases(
+        pink1_expr,
+        gene_expr
+      )
+      
+      if(sum(valid) < 3){
+        
+        return(NULL)
+        
+      }
+      
+      x <- pink1_expr[valid]
+      y <- gene_expr[valid]
+      
+      if(sd(x) == 0 || sd(y) == 0){
+        
+        return(NULL)
+        
+      }
+      
+      ct <- tryCatch(
+        
+        cor.test(
+          x,
+          y,
+          method = "pearson"
+        ),
+        
+        error = function(e) NULL
+        
+      )
+      
+      if(is.null(ct))
+        return(NULL)
+      
+      data.frame(
+        
+        Gene = gene,
+        
+        Pearson_R =
+          unname(ct$estimate),
+        
+        Pvalue =
+          ct$p.value,
+        
+        N = length(x),
+        
+        stringsAsFactors = FALSE
+        
+      )
+      
+    }
+    
+  )
+  
+  results <- Filter(
+    Negate(is.null),
+    results
+  )
+  
+  if(length(results) == 0){
+    
+    return(NULL)
+    
+  }
+  
+  bind_rows(results) %>%
+    
+    mutate(
+      
+      FDR =
+        p.adjust(
+          Pvalue,
+          method = "BH"
+        ),
+      
+      Significance = case_when(
+        
+        FDR < 0.001 ~ "***",
+        
+        FDR < 0.01 ~ "**",
+        
+        FDR < 0.05 ~ "*",
+        
+        TRUE ~ "ns"
+        
+      )
+      
+    ) %>%
+    
+    arrange(
+      desc(abs(Pearson_R))
+    )
+  
+}
+
+# ============================================================
+# BARPLOT FUNCTION
+# ============================================================
+
+plot_barplot <- function(
+    corr_df,
+    title,
+    outfile
+){
+  
+  plot_df <- corr_df %>%
+    
+    mutate(
+      
+      Label = paste0(
+        "r=",
+        round(Pearson_R, 2),
+        "\n",
+        Significance
+      )
+      
+    )
+  
+  p <- ggplot(
+    
+    plot_df,
+    
+    aes(
+      reorder(Gene, Pearson_R),
+      Pearson_R,
+      fill = Pearson_R
+    )
+    
+  ) +
+    
+    geom_col() +
+    
+    geom_text(
+      
+      aes(label = Label),
+      
+      hjust = ifelse(
+        plot_df$Pearson_R > 0,
+        -0.15,
+        1.15
+      ),
+      
+      size = 3
+      
+    ) +
+    
+    coord_flip(
+      clip = "off"
+    ) +
+    
+    scale_fill_gradient2(
+      
+      low = "#2166AC",
+      
+      mid = "white",
+      
+      high = "#B2182B",
+      
+      midpoint = 0
+      
+    ) +
+    
+    theme_classic(
+      base_size = 14
+    ) +
+    
+    theme(
+      plot.margin =
+        margin(
+          5.5,
+          40,
+          5.5,
+          5.5
+        )
+    ) +
+    
+    labs(
+      
+      title = title,
+      
+      x = NULL,
+      
+      y = "Pearson Correlation (r)"
+      
+    )
+  
+  ggsave(
+    outfile,
+    p,
+    width = 9,
+    height = 7,
+    dpi = 300
+  )
+  
+}
+
+# ============================================================
+# HEATMAP FUNCTION
+# ============================================================
+
+plot_heatmap <- function(
+    corr_df,
+    outfile
+){
+  
+  corr_mat <- matrix(
+    corr_df$Pearson_R,
+    nrow = 1
+  )
+  
+  colnames(corr_mat) <- corr_df$Gene
+  rownames(corr_mat) <- "PINK1"
+  
+  annotation_numbers <- matrix(
+    
+    paste0(
+      
+      round(
+        corr_df$Pearson_R,
+        2
+      ),
+      
+      "\nFDR=",
+      
+      signif(
+        corr_df$FDR,
+        2
+      )
+      
+    ),
+    
+    nrow = 1
+    
+  )
+  
+  pheatmap(
+    
+    corr_mat,
+    
+    cluster_rows = FALSE,
+    cluster_cols = FALSE,
+    
+    display_numbers =
+      annotation_numbers,
+    
+    number_color = "black",
+    
+    color = colorRampPalette(
+      c(
+        "#2166AC",
+        "white",
+        "#B2182B"
+      )
+    )(100),
+    
+    fontsize = 12,
+    
+    fontsize_col = 10,
+    
+    filename = outfile,
+    
+    width = 12,
+    
+    height = 3
+    
+  )
+  
+}
+
+# ============================================================
+# SCATTERPLOTS
+# ============================================================
+
+create_scatterplots <- function(
+    corr_df,
+    pink1_expr,
+    expression_matrix,
+    output_dir,
+    condition_name = "All Samples"
+){
+  
+  if(is.null(corr_df))
+    return(NULL)
+  
+  dir.create(
+    output_dir,
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+  
+  for(gene in corr_df$Gene){
+    
+    gene_expr <- as.numeric(
+      expression_matrix[gene, ]
+    )
+    
+    valid <- complete.cases(
+      pink1_expr,
+      gene_expr
+    )
+    
+    if(sum(valid) < 3)
+      next
+    
+    x <- pink1_expr[valid]
+    y <- gene_expr[valid]
+    
+    corr_row <- corr_df %>%
+      filter(Gene == gene)
+    
+    r_val <- round(
+      corr_row$Pearson_R[1],
+      3
+    )
+    
+    p_val <- signif(
+      corr_row$Pvalue[1],
+      3
+    )
+    
+    fdr_val <- signif(
+      corr_row$FDR[1],
+      3
+    )
+    
+    sig_label <- corr_row$Significance[1]
+    
+    p <- ggplot(
+      
+      data.frame(
+        PINK1 = x,
+        Expression = y
+      ),
+      
+      aes(
+        PINK1,
+        Expression
+      )
+      
+    ) +
+      
+      geom_point(
+        size = 3,
+        color = "#2166AC"
+      ) +
+      
+      geom_smooth(
+        method = "lm",
+        se = TRUE,
+        color = "#B2182B"
+      ) +
+      
+      annotate(
+        
+        "label",
+        
+        x = quantile(x, 0.05),
+        
+        y = quantile(y, 0.95),
+        
+        hjust = 0,
+        
+        vjust = 1,
+        
+        size = 4,
+        
+        label = paste0(
+          
+          "r = ", r_val,
+          
+          "\np = ", p_val,
+          
+          "\nFDR = ", fdr_val,
+          
+          "\nSignificance = ", sig_label,
+          
+          "\nn = ", length(x)
+          
+        )
+        
+      ) +
+      
+      theme_classic(
+        base_size = 14
+      ) +
+      
+      labs(
+        
+        title = paste(
+          "PINK1 vs",
+          gene
+        ),
+        
+        subtitle =
+          condition_name,
+        
+        x =
+          "PINK1 VST Expression",
+        
+        y =
+          paste0(
+            gene,
+            " VST Expression"
+          )
+        
+      )
+    
+    ggsave(
+      
+      file.path(
+        
+        output_dir,
+        
+        paste0(
+          "PINK1_vs_",
+          gene,
+          ".png"
+        )
+        
+      ),
+      
+      p,
+      
+      width = 6,
+      height = 5,
+      dpi = 300
+      
+    )
+    
+  }
+  
+}
+
+# ============================================================
+# ALL SAMPLE ANALYSIS
+# ============================================================
+
+pink1_expr <- as.numeric(
+  vst_mat[pink1_gene, ]
+)
+
+corr_all <- calculate_correlations(
+  
+  pink1_expr,
+  
+  vst_mat,
+  
+  present_biomarkers
+  
+)
+
+write.csv(
+  
+  corr_all,
+  
+  file.path(
+    corr_dir,
+    "Pink1_Correlations_AllSamples.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+write.csv(
+  
+  head(
+    arrange(
+      corr_all,
+      desc(Pearson_R)
+    ),
+    10
+  ),
+  
+  file.path(
+    corr_dir,
+    "Top_Positive_Biomarkers.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+write.csv(
+  
+  head(
+    arrange(
+      corr_all,
+      Pearson_R
+    ),
+    10
+  ),
+  
+  file.path(
+    corr_dir,
+    "Top_Negative_Biomarkers.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+plot_barplot(
+  corr_all,
+  "PINK1 Correlations Across All Samples",
+  file.path(
+    corr_dir,
+    "Pink1_Barplot_AllSamples.png"
+  )
+)
+
+plot_heatmap(
+  corr_all,
+  file.path(
+    corr_dir,
+    "Pink1_Heatmap_AllSamples.png"
+  )
+)
+
+create_scatterplots(
+  
+  corr_all,
+  
+  pink1_expr,
+  
+  vst_mat,
+  
+  file.path(
+    corr_dir,
+    "Scatterplots_AllSamples"
+  ),
+  
+  "All Samples"
+  
+)
+
+# ============================================================
+# CONDITION ANALYSIS
+# ============================================================
+
+sample_info$Condition <- paste(
+  
+  sample_info$genotype,
+  
+  sample_info$treatment,
+  
+  sep = "_"
+  
+)
+
+conditions <- sort(
+  unique(sample_info$Condition)
+)
+
+condition_results <- list()
+
+for(condition in conditions){
+  
+  samples_use <- sample_info %>%
+    
+    filter(
+      Condition == condition
+    ) %>%
+    
+    pull(
+      SampleID
+    )
+  
+  if(length(samples_use) < 3)
+    next
+  
+  condition_matrix <- vst_mat[
+    ,
+    samples_use,
+    drop = FALSE
+  ]
+  
+  condition_pink1 <- as.numeric(
+    condition_matrix[pink1_gene, ]
+  )
+  
+  res <- calculate_correlations(
+    
+    condition_pink1,
+    
+    condition_matrix,
+    
+    present_biomarkers
+    
+  )
+  
+  if(is.null(res))
+    next
+  
+  condition_results[[condition]] <- res
+  
+  write.csv(
+    
+    res,
+    
+    file.path(
+      
+      corr_dir,
+      
+      paste0(
+        "Pink1_Correlation_",
+        condition,
+        ".csv"
+      )
+      
+    ),
+    
+    row.names = FALSE
+    
+  )
+  
+  plot_barplot(
+    
+    res,
+    
+    paste(
+      "PINK1 Correlations:",
+      condition
+    ),
+    
+    file.path(
+      corr_dir,
+      paste0(
+        "Pink1_Correlation_",
+        condition,
+        ".png"
+      )
+    )
+    
+  )
+  
+  plot_heatmap(
+    
+    res,
+    
+    file.path(
+      corr_dir,
+      paste0(
+        "Pink1_Heatmap_",
+        condition,
+        ".png"
+      )
+    )
+    
+  )
+  
+  create_scatterplots(
+    
+    res,
+    
+    condition_pink1,
+    
+    condition_matrix,
+    
+    file.path(
+      corr_dir,
+      paste0(
+        "Scatterplots_",
+        condition
+      )
+    ),
+    
+    condition
+    
+  )
+  
+}
+
+# ============================================================
+# SUMMARY TABLE
+# ============================================================
+
+summary_df <- bind_rows(
+  
+  lapply(
+    
+    names(condition_results),
+    
+    function(cond){
+      
+      df <- condition_results[[cond]]
+      
+      data.frame(
+        
+        Condition = cond,
+        
+        N_Biomarkers =
+          nrow(df),
+        
+        Top_Positive_Gene =
+          df$Gene[
+            which.max(df$Pearson_R)
+          ],
+        
+        Top_Positive_R =
+          max(df$Pearson_R),
+        
+        Top_Negative_Gene =
+          df$Gene[
+            which.min(df$Pearson_R)
+          ],
+        
+        Top_Negative_R =
+          min(df$Pearson_R)
+        
+      )
+      
+    }
+    
+  )
+  
+)
+
+write.csv(
+  
+  summary_df,
+  
+  file.path(
+    corr_dir,
+    "Pink1_Correlation_Summary.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+
+# ============================================================
+# EXCEL REPORT
+# ============================================================
+
+wb <- createWorkbook()
+
+addWorksheet(
+  wb,
+  "All_Samples"
+)
+
+writeData(
+  wb,
+  "All_Samples",
+  corr_all
+)
+
+for(cond in names(condition_results)){
+  
+  addWorksheet(
+    wb,
+    cond
+  )
+  
+  writeData(
+    wb,
+    cond,
+    condition_results[[cond]]
+  )
+  
+}
+
+addWorksheet(
+  wb,
+  "Summary"
+)
+
+writeData(
+  wb,
+  "Summary",
+  summary_df
+)
+
+global_summary <- data.frame(
+  
+  N_Biomarkers =
+    nrow(corr_all),
+  
+  Top_Positive_Gene =
+    corr_all$Gene[
+      which.max(
+        corr_all$Pearson_R
+      )
+    ],
+  
+  Top_Positive_R =
+    max(
+      corr_all$Pearson_R
+    ),
+  
+  Top_Negative_Gene =
+    corr_all$Gene[
+      which.min(
+        corr_all$Pearson_R
+      )
+    ],
+  
+  Top_Negative_R =
+    min(
+      corr_all$Pearson_R
+    )
+  
+)
+
+addWorksheet(
+  wb,
+  "Global_Summary"
+)
+
+writeData(
+  wb,
+  "Global_Summary",
+  global_summary
+)
+
+saveWorkbook(
+  
+  wb,
+  
+  file.path(
+    corr_dir,
+    "Pink1_Correlation_Report.xlsx"
+  ),
+  
+  overwrite = TRUE
+  
+)
+
+# ============================================================
+# COMPLETION
+# ============================================================
+
+message("========================================")
+message("PINK1 CORRELATION ANALYSIS COMPLETED")
+message("Results directory: ", corr_dir)
+message("========================================")
+
+
+# ============================================================
+# 07_MTK25_MTK_RESCUE_ANALYSIS
+# ============================================================
+
+# ============================================================
+# SETUP AND VALIDATION
+# ============================================================
+
+suppressPackageStartupMessages({
+  
+  library(dplyr)
+  library(ggplot2)
+  library(ggrepel)
+  library(pheatmap)
+  library(tibble)
+  library(openxlsx)
+  
+})
+
+rescue_dir <- file.path(
+  outdir,
+  "07_MTK_Rescue_Analysis"
+)
+
+dir.create(
+  rescue_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+required_objects <- c(
+  
+  "res_ctrl_df",
+  "res_ko_df",
+  "biomarkers"
+  
+)
+
+missing_objects <- required_objects[
+  !sapply(required_objects, exists)
+]
+
+if(length(missing_objects) > 0){
+  
+  stop(
+    paste(
+      "Missing objects:",
+      paste(
+        missing_objects,
+        collapse = ", "
+      )
+    )
+  )
+  
+}
+
+# ============================================================
+# DISEASE AND TREATMENT SIGNATURES
+# ============================================================
+
+disease_df <- res_ctrl_df %>%
+  
+  select(
+    ENSEMBL,
+    SYMBOL,
+    log2FoldChange,
+    padj
+  ) %>%
+  
+  rename(
+    
+    Disease_log2FC = log2FoldChange,
+    
+    Disease_FDR = padj
+    
+  )
+
+treatment_df <- res_ko_df %>%
+  
+  select(
+    ENSEMBL,
+    SYMBOL,
+    log2FoldChange,
+    padj
+  ) %>%
+  
+  rename(
+    
+    MTK_log2FC = log2FoldChange,
+    
+    MTK_FDR = padj
+    
+  )
+
+rescue_df <- inner_join(
+  
+  disease_df,
+  treatment_df,
+  
+  by = c(
+    "ENSEMBL",
+    "SYMBOL"
+  )
+  
+) %>%
+  
+  filter(
+    
+    !is.na(Disease_log2FC),
+    
+    !is.na(MTK_log2FC)
+    
+  )
+
+# ============================================================
+# RESCUE METRICS
+# ============================================================
+
+rescue_df <- rescue_df %>%
+  
+  mutate(
+    
+    Opposite_Direction =
+      
+      sign(Disease_log2FC) !=
+      sign(MTK_log2FC),
+    
+    Rescue_Percent = pmin(
+      
+      100,
+      
+      100 *
+        
+        abs(MTK_log2FC) /
+        
+        pmax(
+          abs(Disease_log2FC),
+          1e-6
+        )
+      
+    ),
+    
+    Rescue_Score =
+      
+      -Disease_log2FC *
+      MTK_log2FC,
+    
+    Rescue_Status = case_when(
+      
+      Opposite_Direction &
+        Rescue_Percent >= 80 ~
+        
+        "Strong Rescue",
+      
+      Opposite_Direction &
+        Rescue_Percent >= 50 ~
+        
+        "Partial Rescue",
+      
+      Opposite_Direction &
+        Rescue_Percent >= 25 ~
+        
+        "Weak Rescue",
+      
+      TRUE ~
+        
+        "No Rescue"
+      
+    ),
+    
+    Quadrant = case_when(
+      
+      Disease_log2FC > 0 &
+        MTK_log2FC < 0 ~
+        
+        "Rescued_Up",
+      
+      Disease_log2FC < 0 &
+        MTK_log2FC > 0 ~
+        
+        "Rescued_Down",
+      
+      Disease_log2FC > 0 &
+        MTK_log2FC > 0 ~
+        
+        "Concordant_Up",
+      
+      Disease_log2FC < 0 &
+        MTK_log2FC < 0 ~
+        
+        "Concordant_Down",
+      
+      TRUE ~
+        
+        "Other"
+      
+    )
+    
+  )
+
+# ============================================================
+# STRICT RESCUE
+# ============================================================
+
+strict_rescue <- rescue_df %>%
+  
+  filter(
+    
+    Disease_FDR < 0.05,
+    
+    MTK_FDR < 0.05,
+    
+    abs(Disease_log2FC) > 0.58,
+    
+    Rescue_Status %in%
+      
+      c(
+        "Strong Rescue",
+        "Partial Rescue"
+      )
+    
+  ) %>%
+  
+  arrange(
+    desc(Rescue_Score)
+  )
+
+write.csv(
+  
+  rescue_df,
+  
+  file.path(
+    rescue_dir,
+    "MTK_Rescue_AllGenes.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+write.csv(
+  
+  strict_rescue,
+  
+  file.path(
+    rescue_dir,
+    "MTK_Rescued_Genes.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+write.table(
+  
+  strict_rescue$SYMBOL,
+  
+  file.path(
+    rescue_dir,
+    "MTK_Rescued_Gene_List.txt"
+  ),
+  
+  quote = FALSE,
+  row.names = FALSE,
+  col.names = FALSE
+  
+)
+
+# ============================================================
+# GLOBAL RESCUE STATISTICS
+# ============================================================
+
+rescue_cor <- cor.test(
+  
+  rescue_df$Disease_log2FC,
+  
+  -rescue_df$MTK_log2FC,
+  
+  method = "pearson"
+  
+)
+
+rescue_lm <- lm(
+  
+  MTK_log2FC ~
+    
+    Disease_log2FC,
+  
+  data = rescue_df
+  
+)
+
+capture.output(
+  
+  rescue_cor,
+  
+  file.path(
+    rescue_dir,
+    "MTK_Rescue_Correlation.txt"
+  )
+  
+)
+
+capture.output(
+  
+  summary(
+    rescue_lm
+  ),
+  
+  file.path(
+    rescue_dir,
+    "MTK_Rescue_Regression.txt"
+  )
+  
+)
+
+# ============================================================
+# RESCUE SCATTERPLOT
+# ============================================================
+
+top_labels <- strict_rescue %>%
+  
+  slice_max(
+    Rescue_Score,
+    n = 20
+  )
+
+p_rescue <- ggplot(
+  
+  rescue_df,
+  
+  aes(
+    
+    Disease_log2FC,
+    
+    MTK_log2FC,
+    
+    colour = Rescue_Status
+    
+  )
+  
+) +
+  
+  geom_hline(
+    yintercept = 0,
+    linetype = 2
+  ) +
+  
+  geom_vline(
+    xintercept = 0,
+    linetype = 2
+  ) +
+  
+  geom_point(
+    alpha = 0.65,
+    size = 2.3
+  ) +
+  
+  geom_smooth(
+    
+    method = "lm",
+    
+    colour = "black",
+    
+    linewidth = 0.8,
+    
+    se = TRUE
+    
+  ) +
+  
+  geom_text_repel(
+    
+    data = top_labels,
+    
+    aes(label = SYMBOL),
+    
+    size = 3.5
+    
+  ) +
+  
+  coord_equal() +
+  
+  scale_colour_manual(
+    
+    values = c(
+      
+      "Strong Rescue" = "#1B9E77",
+      
+      "Partial Rescue" = "#66A61E",
+      
+      "Weak Rescue" = "#E6AB02",
+      
+      "No Rescue" = "#BDBDBD"
+      
+    )
+    
+  ) +
+  
+  theme_bw(base_size = 14) +
+  
+  labs(
+    
+    title =
+      "MTK Transcriptomic Rescue Analysis",
+    
+    subtitle = paste0(
+      
+      "Pearson r = ",
+      
+      round(
+        rescue_cor$estimate,
+        3
+      ),
+      
+      " | p = ",
+      
+      signif(
+        rescue_cor$p.value,
+        3
+      )
+      
+    ),
+    
+    x =
+      "KO_Ctrl vs WT_Ctrl (log2FC)",
+    
+    y =
+      "KO_MTK vs KO_Ctrl (log2FC)"
+    
+  )
+
+ggsave(
+  
+  file.path(
+    rescue_dir,
+    "MTK_Rescue_Scatterplot.png"
+  ),
+  
+  p_rescue,
+  
+  width = 9,
+  height = 8,
+  dpi = 300
+  
+)
+
+# ============================================================
+# BIOMARKER RESCUE
+# ============================================================
+
+biomarker_rescue <- rescue_df %>%
+  
+  filter(
+    
+    toupper(SYMBOL) %in%
+      
+      toupper(
+        biomarkers
+      )
+    
+  )
+
+write.csv(
+  
+  biomarker_rescue,
+  
+  file.path(
+    rescue_dir,
+    "MTK_Rescue_Biomarkers.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# BIOMARKER FIGURES
+# ============================================================
+
+p_biomarker <- ggplot(
+  
+  biomarker_rescue,
+  
+  aes(
+    
+    reorder(
+      SYMBOL,
+      Rescue_Score
+    ),
+    
+    Rescue_Score,
+    
+    fill = Rescue_Status
+    
+  )
+  
+) +
+  
+  geom_col() +
+  
+  coord_flip() +
+  
+  theme_bw(base_size = 14)
+
+ggsave(
+  
+  file.path(
+    rescue_dir,
+    "Biomarker_Rescue_Barplot.png"
+  ),
+  
+  p_biomarker,
+  
+  width = 9,
+  height = 7,
+  dpi = 300
+  
+)
+# ============================================================
+# BIOMARKER HEATMAP
+# ============================================================
+
+hm <- biomarker_rescue %>%
+  
+  select(
+    
+    SYMBOL,
+    
+    Disease_log2FC,
+    
+    MTK_log2FC,
+    
+    Rescue_Percent
+    
+  )
+
+hm_mat <- as.matrix(
+  hm[, -1]
+)
+
+rownames(hm_mat) <- hm$SYMBOL
+
+pheatmap(
+  
+  hm_mat,
+  
+  cluster_rows = TRUE,
+  
+  cluster_cols = FALSE,
+  
+  border_color = NA,
+  
+  filename = file.path(
+    
+    rescue_dir,
+    
+    "Biomarker_Rescue_Heatmap.png"
+    
+  )
+  
+)
+# ============================================================
+# SUMMARY + EXCEL
+# ============================================================
+
+publication_summary <- data.frame(
+  
+  Metric = c(
+    
+    "Total genes",
+    
+    "Disease-associated genes",
+    
+    "Strong rescue",
+    
+    "Partial rescue",
+    
+    "Weak rescue",
+    
+    "Strict rescued genes",
+    
+    "Global rescue correlation",
+    
+    "Regression slope"
+    
+  ),
+  
+  Value = c(
+    
+    nrow(rescue_df),
+    
+    sum(
+      rescue_df$Disease_FDR < 0.05,
+      na.rm = TRUE
+    ),
+    
+    sum(
+      rescue_df$Rescue_Status ==
+        "Strong Rescue"
+    ),
+    
+    sum(
+      rescue_df$Rescue_Status ==
+        "Partial Rescue"
+    ),
+    
+    sum(
+      rescue_df$Rescue_Status ==
+        "Weak Rescue"
+    ),
+    
+    nrow(strict_rescue),
+    
+    round(
+      rescue_cor$estimate,
+      3
+    ),
+    
+    round(
+      coef(rescue_lm)[2],
+      3
+    )
+    
+  )
+  
+)
+
+write.csv(
+  
+  publication_summary,
+  
+  file.path(
+    rescue_dir,
+    "MTK_Publication_Summary.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+wb <- createWorkbook()
+
+addWorksheet(wb,"All_Genes")
+writeData(wb,"All_Genes",rescue_df)
+
+addWorksheet(wb,"Strict_Rescue")
+writeData(wb,"Strict_Rescue",strict_rescue)
+
+addWorksheet(wb,"Biomarkers")
+writeData(wb,"Biomarkers",biomarker_rescue)
+
+addWorksheet(wb,"Summary")
+writeData(wb,"Summary",publication_summary)
+
+saveWorkbook(
+  
+  wb,
+  
+  file.path(
+    rescue_dir,
+    "MTK_Rescue_Report.xlsx"
+  ),
+  
+  overwrite = TRUE
+  
+)
+
+
+# ============================================================
+# 08_MTK25_NEUROENDOCRINE_ANALYSIS
+# SETUP + SIGNATURE + SCORE
+# ============================================================
+
+suppressPackageStartupMessages({
+  
+  library(dplyr)
+  library(tidyr)
+  
+  library(ggplot2)
+  library(ggpubr)
+  library(rstatix)
+  library(ggrepel)
+  
+  library(pheatmap)
+  library(openxlsx)
+  
+})
+
+# ============================================================
+# OUTPUT DIRECTORY
+# ============================================================
+
+ne_dir <- file.path(
+  
+  outdir,
+  
+  "08_Neuroendocrine_Analysis"
+  
+)
+
+dir.create(
+  
+  ne_dir,
+  
+  recursive = TRUE,
+  
+  showWarnings = FALSE
+  
+)
+
+# ============================================================
+# NEUROENDOCRINE SIGNATURE
+# ============================================================
+
+ne_signature <- c(
+  
+  "Chga",
+  "Chgb",
+  
+  "Insm1",
+  "Syp",
+  
+  "Scg2",
+  "Scg3",
+  
+  "Ncam1",
+  "Eno2",
+  
+  "Foxa2",
+  "Sox2",
+  
+  "Mycn"
+  
+)
+
+ne_signature <- unique(
+  
+  rownames(vst_mat)[
+    
+    toupper(
+      rownames(vst_mat)
+    ) %in%
+      
+      toupper(
+        ne_signature
+      )
+    
+  ]
+  
+)
+
+if(length(ne_signature) < 3){
+  
+  stop(
+    "Too few neuroendocrine markers detected."
+  )
+  
+}
+
+cat(
+  "\nDetected neuroendocrine genes:\n"
+)
+
+print(ne_signature)
+
+# ============================================================
+# PINK1
+# ============================================================
+
+pink1_gene <- rownames(vst_mat)[
+  
+  toupper(
+    rownames(vst_mat)
+  ) == "PINK1"
+  
+]
+
+if(length(pink1_gene) == 0){
+  
+  stop(
+    "PINK1 not found."
+  )
+  
+}
+
+pink1_gene <- pink1_gene[1]
+
+# ============================================================
+# CONDITIONS
+# ============================================================
+
+sample_info$Condition <- paste(
+  
+  sample_info$genotype,
+  sample_info$treatment,
+  
+  sep = "_"
+  
+)
+
+condition_order <- c(
+  
+  "WT_Ctrl",
+  "WT_MTK",
+  
+  "KO_Ctrl",
+  "KO_MTK"
+  
+)
+
+sample_info$Condition <- factor(
+  
+  sample_info$Condition,
+  
+  levels = condition_order
+  
+)
+
+condition_colors <- c(
+  
+  WT_Ctrl = "#4E79A7",
+  WT_MTK  = "#59A14F",
+  
+  KO_Ctrl = "#E15759",
+  KO_MTK  = "#F28E2B"
+  
+)
+
+# ============================================================
+# Z-SCORE BASED NE SCORE
+# ============================================================
+
+ne_matrix <- vst_mat[
+  
+  ne_signature,
+  
+  ,
+  
+  drop = FALSE
+  
+]
+
+ne_scaled <- t(
+  
+  scale(
+    t(ne_matrix)
+  )
+  
+)
+
+ne_score <- colMeans(
+  
+  ne_scaled,
+  
+  na.rm = TRUE
+  
+)
+
+ne_df <- data.frame(
+  
+  SampleID =
+    colnames(vst_mat),
+  
+  NE_Score =
+    as.numeric(
+      ne_score
+    ),
+  
+  Pink1 =
+    as.numeric(
+      
+      vst_mat[
+        pink1_gene,
+      ]
+      
+    )
+  
+)
+
+ne_df <- left_join(
+  
+  ne_df,
+  
+  sample_info,
+  
+  by = "SampleID"
+  
+)
+
+write.csv(
+  
+  ne_df,
+  
+  file.path(
+    ne_dir,
+    "Neuroendocrine_Score.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# STATISTICS
+# ============================================================
+
+kw_test <- kruskal.test(
+  
+  NE_Score ~ Condition,
+  
+  data = ne_df
+  
+)
+
+pairwise_ne <- ne_df %>%
+  
+  pairwise_wilcox_test(
+    
+    NE_Score ~ Condition,
+    
+    p.adjust.method = "BH"
+    
+  )
+
+write.csv(
+  
+  as.data.frame(pairwise_ne),
+  
+  file.path(
+    ne_dir,
+    "NE_FDR_Table.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+summary_ne <- ne_df %>%
+  
+  group_by(
+    Condition
+  ) %>%
+  
+  summarise(
+    
+    N = n(),
+    
+    Mean_NE =
+      round(
+        mean(NE_Score),
+        3
+      ),
+    
+    SD_NE =
+      round(
+        sd(NE_Score),
+        3
+      ),
+    
+    .groups = "drop"
+    
+  )
+
+write.csv(
+  
+  summary_ne,
+  
+  file.path(
+    ne_dir,
+    "NE_Summary_By_Condition.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# PLOT COMPARISONS
+# ============================================================
+
+pairwise_ne_plot <- pairwise_ne %>%
+  
+  filter(
+    p.adj <= 0.50
+  ) %>%
+  
+  add_xy_position(
+    x = "Condition"
+  )
+
+if(nrow(pairwise_ne_plot) > 0){
+  
+  pairwise_ne_plot$y.position <-
+    
+    pairwise_ne_plot$y.position +
+    
+    seq(
+      0,
+      by = 0.05,
+      length.out = nrow(pairwise_ne_plot)
+    )
+  
+}
+
+ymax <- max(
+  ne_df$NE_Score,
+  na.rm = TRUE
+)
+
+# ============================================================
+# BOXPLOT
+# ============================================================
+
+p_ne <- ggplot(
+  
+  ne_df,
+  
+  aes(
+    
+    Condition,
+    
+    NE_Score,
+    
+    fill = Condition
+    
+  )
+  
+) +
+  
+  geom_boxplot(
+    
+    width = 0.65,
+    
+    alpha = 0.85,
+    
+    linewidth = 0.7,
+    
+    colour = "black",
+    
+    outlier.shape = NA
+    
+  ) +
+  
+  geom_jitter(
+    
+    width = 0.08,
+    
+    size = 3,
+    
+    alpha = 0.9
+    
+  ) +
+  
+  stat_pvalue_manual(
+    
+    pairwise_ne_plot,
+    
+    label = "p.adj",
+    
+    size = 3,
+    
+    tip.length = 0.01
+    
+  ) +
+  
+  scale_fill_manual(
+    
+    values = condition_colors
+    
+  ) +
+  
+  coord_cartesian(
+    
+    ylim = c(
+      
+      min(ne_df$NE_Score) - 0.2,
+      
+      ymax + 0.8
+      
+    )
+    
+  ) +
+  
+  theme_classic(
+    base_size = 14
+  ) +
+  
+  theme(
+    
+    legend.position = "none",
+    
+    plot.title =
+      element_text(
+        face = "bold"
+      )
+    
+  ) +
+  
+  labs(
+    
+    title = paste0(
+      
+      "Neuroendocrine Score by Condition\n",
+      
+      "Kruskal-Wallis p = ",
+      
+      signif(
+        kw_test$p.value,
+        3
+      )
+      
+    ),
+    
+    x = NULL,
+    
+    y = "Neuroendocrine Score (z-score)"
+    
+  )
+
+ggsave(
+  
+  file.path(
+    
+    ne_dir,
+    
+    "NE_Score_Boxplot.png"
+    
+  ),
+  
+  p_ne,
+  
+  width = 8,
+  
+  height = 6,
+  
+  dpi = 300
+  
+)
+
+# ============================================================
+# PINK1 VS NE PROGRAM
+# ============================================================
+
+cor_test <- cor.test(
+  
+  ne_df$Pink1,
+  
+  ne_df$NE_Score,
+  
+  method = "pearson"
+  
+)
+
+lm_mod <- lm(
+  
+  NE_Score ~ Pink1,
+  
+  data = ne_df
+  
+)
+
+r2 <- summary(
+  lm_mod
+)$r.squared
+
+cor_summary <- data.frame(
+  
+  Pearson_R =
+    round(
+      cor_test$estimate,
+      4
+    ),
+  
+  Pvalue =
+    signif(
+      cor_test$p.value,
+      4
+    ),
+  
+  R2 =
+    round(
+      r2,
+      4
+    )
+  
+)
+
+write.csv(
+  
+  cor_summary,
+  
+  file.path(
+    ne_dir,
+    "Pink1_NE_Correlation.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+
+formatted_p <- format.pval(
+  
+  cor_test$p.value,
+  
+  digits = 3
+  
+)
+
+p_scatter <- ggplot(
+  
+  ne_df,
+  
+  aes(
+    Pink1,
+    NE_Score
+  )
+  
+) +
+  
+  geom_point(
+    
+    aes(
+      color = Condition
+    ),
+    
+    size = 4
+    
+  ) +
+  
+  geom_smooth(
+    
+    method = "lm",
+    
+    color = "black",
+    
+    linewidth = 1,
+    
+    se = TRUE
+    
+  ) +
+  
+  scale_color_manual(
+    
+    values = condition_colors
+    
+  ) +
+  
+  annotate(
+    
+    "text",
+    
+    x = Inf,
+    y = Inf,
+    
+    hjust = 1.1,
+    vjust = 1.5,
+    
+    size = 4,
+    
+    label = paste0(
+      
+      "r = ",
+      round(
+        cor_test$estimate,
+        3
+      ),
+      
+      "\nR² = ",
+      round(
+        r2,
+        3
+      ),
+      
+      "\np = ",
+      formatted_p,
+      
+      "\nN = ",
+      nrow(ne_df)
+      
+    )
+    
+  ) +
+  
+  theme_classic(
+    base_size = 14
+  ) +
+  
+  labs(
+    
+    title =
+      "PINK1 Expression vs Neuroendocrine Program",
+    
+    x = "PINK1 VST Expression",
+    
+    y = "Neuroendocrine Score (z-score)"
+    
+  )
+
+ggsave(
+  
+  file.path(
+    
+    ne_dir,
+    
+    "Pink1_vs_NE_Score.png"
+    
+  ),
+  
+  p_scatter,
+  
+  width = 8,
+  
+  height = 6,
+  
+  dpi = 300
+  
+)
+
+# ============================================================
+# HEATMAP
+# ============================================================
+
+sample_order <- sample_info %>%
+  
+  arrange(
+    Condition
+  ) %>%
+  
+  pull(
+    SampleID
+  )
+
+heat_mat_plot <- ne_matrix[
+  ,
+  sample_order
+]
+
+annotation_col <- data.frame(
+  
+  Condition =
+    sample_info$Condition
+  
+)
+
+rownames(
+  annotation_col
+) <- sample_info$SampleID
+
+annotation_col <- annotation_col[
+  sample_order,
+  ,
+  drop = FALSE
+]
+
+ann_colors <- list(
+  
+  Condition =
+    condition_colors
+  
+)
+
+pheatmap(
+  
+  heat_mat_plot,
+  
+  scale = "row",
+  
+  cluster_rows = TRUE,
+  
+  cluster_cols = FALSE,
+  
+  annotation_col =
+    annotation_col,
+  
+  annotation_colors =
+    ann_colors,
+  
+  border_color = NA,
+  
+  fontsize_row = 10,
+  
+  filename = file.path(
+    
+    ne_dir,
+    
+    "NE_Marker_Heatmap.png"
+    
+  ),
+  
+  width = 10,
+  
+  height = 7
+  
+)
+
+# ============================================================
+# MARKERS + RESCUE + REPORT
+# ============================================================
+
+expr_long <- as.data.frame(
+  t(ne_matrix)
+)
+
+expr_long$SampleID <- rownames(
+  expr_long
+)
+
+expr_long <- left_join(
+  
+  expr_long,
+  
+  sample_info,
+  
+  by = "SampleID"
+  
+)
+
+expr_long <- expr_long %>%
+  
+  pivot_longer(
+    
+    cols = all_of(
+      ne_signature
+    ),
+    
+    names_to = "Gene",
+    
+    values_to = "Expression"
+    
+  )
+
+p_marker <- ggplot(
+  
+  expr_long,
+  
+  aes(
+    
+    Condition,
+    
+    Expression,
+    
+    fill = Condition
+    
+  )
+  
+) +
+  
+  geom_boxplot(
+    
+    width = 0.7,
+    
+    alpha = 0.8,
+    
+    outlier.shape = NA
+    
+  ) +
+  
+  geom_jitter(
+    
+    width = 0.08,
+    
+    size = 2,
+    
+    alpha = 0.8
+    
+  ) +
+  
+  scale_fill_manual(
+    
+    values =
+      condition_colors
+    
+  ) +
+  
+  facet_wrap(
+    
+    ~Gene,
+    
+    scales = "free_y",
+    
+    ncol = 4
+    
+  ) +
+  
+  theme_bw(
+    base_size = 12
+  ) +
+  
+  theme(
+    
+    legend.position = "none",
+    
+    axis.text.x =
+      element_text(
+        angle = 45,
+        hjust = 1
+      ),
+    
+    strip.text =
+      element_text(
+        face = "bold"
+      )
+    
+  ) +
+  
+  labs(
+    
+    title =
+      "Neuroendocrine Marker Expression",
+    
+    x = NULL,
+    
+    y = "VST Expression"
+    
+  )
+
+ggsave(
+  
+  file.path(
+    
+    ne_dir,
+    
+    "NE_Marker_Facets.png"
+    
+  ),
+  
+  p_marker,
+  
+  width = 14,
+  
+  height = 9,
+  
+  dpi = 300
+  
+)
+
+# ============================================================
+# NE RESCUE
+# ============================================================
+
+if(exists("rescue_df")){
+  
+  ne_rescue <- rescue_df %>%
+    
+    filter(
+      
+      toupper(SYMBOL) %in%
+        
+        toupper(
+          ne_signature
+        )
+      
+    )
+  
+  write.csv(
+    
+    ne_rescue,
+    
+    file.path(
+      
+      ne_dir,
+      
+      "Neuroendocrine_Rescue.csv"
+      
+    ),
+    
+    row.names = FALSE
+    
+  )
+  
+}
+
+# ============================================================
+# EXCEL REPORT
+# ============================================================
+
+wb <- createWorkbook()
+
+addWorksheet(wb,"NE_Score")
+writeData(wb,"NE_Score",ne_df)
+
+addWorksheet(wb,"Statistics")
+writeData(wb,"Statistics",summary_ne)
+
+addWorksheet(wb,"Pairwise_FDR")
+writeData(wb,"Pairwise_FDR",as.data.frame(pairwise_ne))
+
+addWorksheet(wb,"Pink1_Correlation")
+writeData(wb,"Pink1_Correlation",cor_summary)
+
+addWorksheet(wb,"Marker_Expression")
+writeData(wb,"Marker_Expression",expr_long)
+
+if(exists("ne_rescue")){
+  
+  addWorksheet(wb,"NE_Rescue")
+  writeData(wb,"NE_Rescue",ne_rescue)
+  
+}
+
+saveWorkbook(
+  
+  wb,
+  
+  file.path(
+    
+    ne_dir,
+    
+    "Neuroendocrine_Report.xlsx"
+    
+  ),
+  
+  overwrite = TRUE
+  
+)
+
+cat(
+  "\n=====================================\n"
+)
+cat(
+  "NEUROENDOCRINE ANALYSIS COMPLETED\n"
+)
+cat(
+  "=====================================\n"
+)
+cat(
+  ne_dir,
+  "\n"
+)
+cat(
+  "=====================================\n"
+)
+
+# ============================================================
+# 09_MTK25_CELLTYPE_SIGNATURE_ANALYSIS
+# SESSION 1
+# SETUP + SIGNATURE SCORING
+# ============================================================
+
+suppressPackageStartupMessages({
+  
+  library(dplyr)
+  library(tidyr)
+  
+  library(ggplot2)
+  library(ggpubr)
+  library(rstatix)
+  
+  library(pheatmap)
+  library(openxlsx)
+  
+})
+
+# ============================================================
+# OUTPUT DIRECTORY
+# ============================================================
+
+cell_dir <- file.path(
+  
+  outdir,
+  
+  "09_CellType_Signatures"
+  
+)
+
+dir.create(
+  
+  cell_dir,
+  
+  recursive = TRUE,
+  
+  showWarnings = FALSE
+  
+)
+
+# ============================================================
+# CONDITIONS
+# ============================================================
+
+sample_info$Condition <- factor(
+  
+  paste(
+    
+    sample_info$genotype,
+    
+    sample_info$treatment,
+    
+    sep = "_"
+    
+  ),
+  
+  levels = c(
+    
+    "WT_Ctrl",
+    "WT_MTK",
+    "KO_Ctrl",
+    "KO_MTK"
+    
+  )
+  
+)
+
+# ============================================================
+# SIGNATURES
+# ============================================================
+
+cell_signatures <- list(
+  
+  Monocytes_Macrophages = c(
+    "Adgre1","Cd68","Csf1r",
+    "Lyz2","Tyrobp","Fcgr3"
+  ),
+  
+  Microglia = c(
+    "Cx3cr1","P2ry12","Tmem119",
+    "Aif1","Hexb","Sall1"
+  ),
+  
+  Activated_Microglia = c(
+    "Apoe","Lpl","Cst7",
+    "Itgax","Lgals3","Cd74"
+  ),
+  
+  Endothelial_Cells = c(
+    "Pecam1","Cdh5","Kdr",
+    "Tek","Emcn","Vwf"
+  ),
+  
+  Vessels = c(
+    "Kdr","Flt1","Eng",
+    "Cdh5","Vwf",
+    "Col4a1","Col4a2"
+  ),
+  
+  Pericytes = c(
+    "Pdgfrb","Rgs5",
+    "Cspg4","Mcam","Des"
+  ),
+  
+  Astrocytes = c(
+    "Gfap","Aldh1l1",
+    "Aqp4","Slc1a3","Slc1a2"
+  ),
+  
+  Oligodendrocytes = c(
+    "Mbp","Plp1",
+    "Mog","Mag","Cnp"
+  ),
+  
+  OPCs = c(
+    "Pdgfra",
+    "Cspg4",
+    "Olig1",
+    "Olig2"
+  ),
+  
+  Neurons = c(
+    "Rbfox3",
+    "Snap25",
+    "Syp",
+    "Tubb3",
+    "Map2"
+  ),
+  
+  Dopaminergic_Neurons = c(
+    "Th",
+    "Slc6a3",
+    "Ddc",
+    "Pitx3",
+    "Nr4a2"
+  ),
+  
+  Neuroendocrine = c(
+    "Chga","Chgb",
+    "Insm1","Syp",
+    "Scg2","Scg3",
+    "Ncam1","Eno2",
+    "Foxa2","Sox2"
+  ),
+  
+  Mitochondrial_Function = c(
+    "Pink1",
+    "Prkn",
+    "Tomm20",
+    "Cox5a",
+    "Ndufa1",
+    "Atp5f1a"
+  )
+  
+)
+
+# ============================================================
+# SCORE EACH SIGNATURE
+# ============================================================
+
+score_list <- list()
+
+for(sig in names(cell_signatures)){
+  
+  genes <- cell_signatures[[sig]]
+  
+  genes_present <- rownames(vst_mat)[
+    
+    toupper(
+      rownames(vst_mat)
+    ) %in%
+      
+      toupper(
+        genes
+      )
+    
+  ]
+  
+  if(length(genes_present) < 3){
+    
+    next
+    
+  }
+  
+  mat <- vst_mat[
+    genes_present,
+    ,
+    drop = FALSE
+  ]
+  
+  mat_scaled <- t(
+    scale(
+      t(mat)
+    )
+  )
+  
+  score <- colMeans(
+    
+    mat_scaled,
+    
+    na.rm = TRUE
+    
+  )
+  
+  score_list[[sig]] <- score
+  
+}
+
+score_df <- as.data.frame(
+  
+  do.call(
+    
+    rbind,
+    
+    score_list
+    
+  )
+  
+)
+
+score_df <- t(score_df)
+
+score_df <- as.data.frame(
+  score_df
+)
+
+score_df$SampleID <- rownames(
+  score_df
+)
+
+score_df <- left_join(
+  
+  score_df,
+  
+  sample_info,
+  
+  by = "SampleID"
+  
+)
+
+write.csv(
+  
+  score_df,
+  
+  file.path(
+    
+    cell_dir,
+    
+    "CellType_Signature_Scores.csv"
+    
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# SESSION 2
+# LONG FORMAT + STATS
+# ============================================================
+
+signature_cols <- names(
+  score_list
+)
+
+cell_long <- score_df %>%
+  
+  select(
+    
+    SampleID,
+    Condition,
+    
+    all_of(
+      signature_cols
+    )
+    
+  ) %>%
+  
+  pivot_longer(
+    
+    cols = all_of(
+      signature_cols
+    ),
+    
+    names_to = "Signature",
+    
+    values_to = "Score"
+    
+  )
+
+cell_stats <- cell_long %>%
+  
+  group_by(
+    Signature
+  ) %>%
+  
+  kruskal_test(
+    
+    Score ~ Condition
+    
+  ) %>%
+  
+  adjust_pvalue(
+    method = "BH"
+  )
+
+write.csv(
+  
+  cell_stats,
+  
+  file.path(
+    
+    cell_dir,
+    
+    "Signature_KruskalWallis.csv"
+    
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# SESSION 3
+# INDIVIDUAL MCP-STYLE PLOTS
+# ============================================================
+
+plot_colors <- c(
+  
+  WT_Ctrl = "#F8766D",
+  
+  WT_MTK = "#FDB863",
+  
+  KO_Ctrl = "#00BFC4",
+  
+  KO_MTK = "#00A087"
+  
+)
+
+for(sig in unique(cell_long$Signature)){
+  
+  plot_df <- cell_long %>%
+    
+    filter(
+      
+      Signature == sig
+      
+    )
+  
+  pw <- compare_means(
+    
+    Score ~ Condition,
+    
+    data = plot_df,
+    
+    method = "wilcox.test"
+    
+  )
+  
+  p <- ggplot(
+    
+    plot_df,
+    
+    aes(
+      
+      Condition,
+      
+      Score,
+      
+      fill = Condition
+      
+    )
+    
+  ) +
+    
+    geom_boxplot(
+      
+      width = 0.65,
+      
+      alpha = 0.85,
+      
+      outlier.shape = NA,
+      
+      linewidth = 0.7
+      
+    ) +
+    
+    geom_point(
+      
+      size = 2.8,
+      
+      alpha = 0.8,
+      
+      position = position_jitter(
+        width = 0.05
+      )
+      
+    ) +
+    
+    scale_fill_manual(
+      
+      values =
+        plot_colors
+      
+    ) +
+    
+    annotate(
+      
+      "text",
+      
+      x = 2.5,
+      
+      y = max(
+        plot_df$Score
+      ) * 1.15,
+      
+      label = paste0(
+        
+        "Kruskal p = ",
+        
+        signif(
+          
+          kruskal.test(
+            
+            Score ~ Condition,
+            
+            data = plot_df
+            
+          )$p.value,
+          
+          3
+          
+        )
+        
+      ),
+      
+      size = 4.5,
+      
+      fontface = "bold"
+      
+    ) +
+    
+    theme_classic(
+      base_size = 14
+    ) +
+    
+    theme(
+      
+      legend.position = "none",
+      
+      plot.title =
+        element_text(
+          
+          face = "bold",
+          
+          hjust = 0.5
+          
+        ),
+      
+      axis.text.x =
+        element_text(
+          
+          angle = 45,
+          
+          hjust = 1
+          
+        )
+      
+    ) +
+    
+    labs(
+      
+      title = sig,
+      
+      x = NULL,
+      
+      y = "Signature Score"
+      
+    )
+  
+  ggsave(
+    
+    file.path(
+      
+      cell_dir,
+      
+      paste0(
+        sig,
+        ".png"
+      )
+      
+    ),
+    
+    p,
+    
+    width = 7,
+    
+    height = 5,
+    
+    dpi = 300
+    
+  )
+  
+}
+
+# ============================================================
+# SESSION 4
+# HEATMAP
+# ============================================================
+
+heat_mat <- as.matrix(
+  
+  score_df %>%
+    
+    select(
+      
+      all_of(
+        signature_cols
+      )
+      
+    )
+  
+)
+
+rownames(
+  heat_mat
+) <- score_df$SampleID
+
+heat_mat <- t(heat_mat)
+
+sample_order <- sample_info %>%
+  
+  arrange(
+    Condition
+  ) %>%
+  
+  pull(
+    SampleID
+  )
+
+heat_mat <- heat_mat[
+  ,
+  sample_order
+]
+
+annotation_col <- data.frame(
+  
+  Condition =
+    sample_info$Condition
+  
+)
+
+rownames(
+  annotation_col
+) <- sample_info$SampleID
+
+annotation_col <- annotation_col[
+  sample_order,
+  ,
+  drop = FALSE
+]
+
+pheatmap(
+  
+  heat_mat,
+  
+  scale = "row",
+  
+  cluster_rows = TRUE,
+  
+  cluster_cols = FALSE,
+  
+  annotation_col =
+    annotation_col,
+  
+  border_color = NA,
+  
+  filename = file.path(
+    
+    cell_dir,
+    
+    "CellType_Heatmap.png"
+    
+  ),
+  
+  width = 11,
+  
+  height = 8
+  
+)
+
+# ============================================================
+# SESSION 5
+# REPORT
+# ============================================================
+
+wb <- createWorkbook()
+
+addWorksheet(
+  wb,
+  "Scores"
+)
+writeData(
+  wb,
+  "Scores",
+  score_df
+)
+
+addWorksheet(
+  wb,
+  "Statistics"
+)
+writeData(
+  wb,
+  "Statistics",
+  cell_stats
+)
+
+saveWorkbook(
+  
+  wb,
+  
+  file.path(
+    
+    cell_dir,
+    
+    "CellType_Report.xlsx"
+    
+  ),
+  
+  overwrite = TRUE
+  
+)
+
+cat(
+  "\n================================\n"
+)
+
+cat(
+  "CELL-TYPE SIGNATURE ANALYSIS COMPLETE\n"
+)
+
+cat(
+  "================================\n"
+)
+
+cat(
+  cell_dir,
+  "\n"
+)
+
+cat(
+  "================================\n"
+)
+
+
+# ============================================================
+# 10_MTK25_HALLMARK_RESCUE_ANALYSIS
+# ============================================================
+
+suppressPackageStartupMessages({
+  
+  library(clusterProfiler)
+  library(msigdbr)
+  
+  library(dplyr)
+  library(tidyr)
+  
+  library(ggplot2)
+  library(pheatmap)
+  
+  library(openxlsx)
+  
+})
+
+# ============================================================
+# OUTPUT DIRECTORY
+# ============================================================
+
+hallmark_rescue_dir <- file.path(
+  
+  outdir,
+  
+  "10_Hallmark_Rescue"
+  
+)
+
+dir.create(
+  
+  hallmark_rescue_dir,
+  
+  recursive = TRUE,
+  
+  showWarnings = FALSE
+  
+)
+
+# ============================================================
+# HALLMARK DATABASE
+# ============================================================
+
+hallmark_db <- msigdbr(
+  
+  species = "Mus musculus",
+  
+  category = "H"
+  
+)
+
+hallmark_sets <- hallmark_db %>%
+  
+  select(
+    
+    gs_name,
+    
+    entrez_gene
+    
+  )
+
+# ============================================================
+# HALLMARK GSEA
+# ============================================================
+
+run_hallmark_gsea <- function(
+    
+  gene_table
+  
+){
+  
+  ranked_genes <- gene_table %>%
+    
+    filter(
+      
+      !is.na(ENTREZID),
+      
+      !is.na(log2FoldChange)
+      
+    ) %>%
+    
+    distinct(
+      
+      ENTREZID,
+      
+      .keep_all = TRUE
+      
+    )
+  
+  gene_list <- ranked_genes$log2FoldChange
+  
+  names(gene_list) <-
+    
+    ranked_genes$ENTREZID
+  
+  gene_list <- sort(
+    
+    gene_list,
+    
+    decreasing = TRUE
+    
+  )
+  
+  GSEA(
+    
+    geneList = gene_list,
+    
+    TERM2GENE = hallmark_sets,
+    
+    pvalueCutoff = 1,
+    
+    verbose = FALSE
+    
+  )
+  
+}
+
+# ============================================================
+# RUN GSEA
+# ============================================================
+
+gsea_disease <- run_hallmark_gsea(
+  
+  res_ctrl_df
+  
+)
+
+gsea_treatment <- run_hallmark_gsea(
+  
+  res_ko_df
+  
+)
+
+disease_df <- as.data.frame(
+  gsea_disease
+)
+
+treatment_df <- as.data.frame(
+  gsea_treatment
+)
+
+# ============================================================
+# RESCUE TABLE
+# ============================================================
+
+rescue_pathways <- disease_df %>%
+  
+  select(
+    
+    ID,
+    Description,
+    
+    NES_Disease = NES,
+    
+    padj_Disease = p.adjust
+    
+  ) %>%
+  
+  inner_join(
+    
+    treatment_df %>%
+      
+      select(
+        
+        ID,
+        
+        NES_Treatment = NES,
+        
+        padj_Treatment = p.adjust
+        
+      ),
+    
+    by = "ID"
+    
+  )
+
+rescue_pathways <- rescue_pathways %>%
+  
+  mutate(
+    
+    Opposite_Direction =
+      
+      sign(NES_Disease) !=
+      
+      sign(NES_Treatment),
+    
+    Rescue_Score =
+      
+      abs(NES_Disease) +
+      
+      abs(NES_Treatment)
+    
+  ) %>%
+  
+  arrange(
+    
+    desc(
+      Rescue_Score
+    )
+    
+  )
+
+write.csv(
+  
+  rescue_pathways,
+  
+  file.path(
+    
+    hallmark_rescue_dir,
+    
+    "Hallmark_Pathway_Rescue.csv"
+    
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# STRONG RESCUE
+# ============================================================
+
+strong_rescue <- rescue_pathways %>%
+  
+  filter(
+    
+    Opposite_Direction,
+    
+    abs(NES_Disease) > 1,
+    
+    abs(NES_Treatment) > 1
+    
+  )
+
+write.csv(
+  
+  strong_rescue,
+  
+  file.path(
+    
+    hallmark_rescue_dir,
+    
+    "Strong_Hallmark_Rescue.csv"
+    
+  ),
+  
+  row.names = FALSE
+  
+)
+
+# ============================================================
+# RESCUE SCATTERPLOT
+# ============================================================
+
+p_rescue <- ggplot(
+  
+  rescue_pathways,
+  
+  aes(
+    
+    NES_Disease,
+    
+    NES_Treatment
+    
+  )
+  
+) +
+  
+  geom_hline(
+    
+    yintercept = 0,
+    
+    linetype = 2
+    
+  ) +
+  
+  geom_vline(
+    
+    xintercept = 0,
+    
+    linetype = 2
+    
+  ) +
+  
+  geom_point(
+    
+    aes(
+      
+      color = Opposite_Direction
+      
+    ),
+    
+    size = 4,
+    
+    alpha = 0.8
+    
+  ) +
+  
+  scale_color_manual(
+    
+    values = c(
+      
+      "FALSE" = "grey70",
+      
+      "TRUE" = "#E15759"
+      
+    )
+    
+  ) +
+  
+  theme_classic(
+    base_size = 14
+  ) +
+  
+  labs(
+    
+    title =
+      
+      "Hallmark Pathway Rescue by MTK",
+    
+    x =
+      
+      "KO vs WT (Ctrl) NES",
+    
+    y =
+      
+      "KO_MTK vs Ctrl (KO) NES",
+    
+    color = "Rescue"
+    
+  )
+
+ggsave(
+  
+  file.path(
+    
+    hallmark_rescue_dir,
+    
+    "Hallmark_Rescue_Scatter.png"
+    
+  ),
+  
+  p_rescue,
+  
+  width = 8,
+  
+  height = 6,
+  
+  dpi = 300
+  
+)
+
+# ============================================================
+# RESCUE HEATMAP
+# ============================================================
+
+heat_df <- strong_rescue %>%
+  
+  select(
+    
+    Description,
+    
+    NES_Disease,
+    
+    NES_Treatment
+    
+  )
+
+heat_mat <- as.matrix(
+  
+  heat_df[,-1]
+  
+)
+
+rownames(
+  heat_mat
+) <- heat_df$Description
+
+pheatmap(
+  
+  heat_mat,
+  
+  cluster_rows = TRUE,
+  
+  cluster_cols = FALSE,
+  
+  color = colorRampPalette(
+    
+    c(
+      
+      "#2166AC",
+      
+      "white",
+      
+      "#B2182B"
+      
+    )
+    
+  )(100),
+  
+  filename = file.path(
+    
+    hallmark_rescue_dir,
+    
+    "Hallmark_Rescue_Heatmap.png"
+    
+  ),
+  
+  width = 8,
+  
+  height = 10
+  
+)
+
+# ============================================================
+# TOP RESCUED PATHWAYS
+# ============================================================
+
+top20 <- strong_rescue %>%
+  
+  slice_max(
+    
+    Rescue_Score,
+    
+    n = 20
+    
+  )
+
+p_bar <- ggplot(
+  
+  top20,
+  
+  aes(
+    
+    reorder(
+      
+      Description,
+      
+      Rescue_Score
+      
+    ),
+    
+    Rescue_Score
+    
+  )
+  
+) +
+  
+  geom_col(
+    
+    fill = "#4E79A7"
+    
+  ) +
+  
+  coord_flip() +
+  
+  theme_classic(
+    base_size = 12
+  ) +
+  
+  labs(
+    
+    title =
+      
+      "Top Rescued Hallmark Pathways",
+    
+    x = NULL,
+    
+    y = "Rescue Score"
+    
+  )
+
+ggsave(
+  
+  file.path(
+    
+    hallmark_rescue_dir,
+    
+    "Top_Rescued_Hallmarks.png"
+    
+  ),
+  
+  p_bar,
+  
+  width = 8,
+  
+  height = 8,
+  
+  dpi = 300
+  
+)
+
+# ============================================================
+# EXCEL REPORT
+# ============================================================
+
+wb <- createWorkbook()
+
+addWorksheet(
+  wb,
+  "All_Pathways"
+)
+
+writeData(
+  
+  wb,
+  
+  "All_Pathways",
+  
+  rescue_pathways
+  
+)
+
+addWorksheet(
+  wb,
+  "Strong_Rescue"
+)
+
+writeData(
+  
+  wb,
+  
+  "Strong_Rescue",
+  
+  strong_rescue
+  
+)
+
+saveWorkbook(
+  
+  wb,
+  
+  file.path(
+    
+    hallmark_rescue_dir,
+    
+    "Hallmark_Rescue_Report.xlsx"
+    
+  ),
+  
+  overwrite = TRUE
+  
+)
+
+cat(
+  "\n=====================================\n"
+)
+
+cat(
+  "HALLMARK PATHWAY RESCUE COMPLETE\n"
+)
+
+cat(
+  "=====================================\n"
+)
+
+cat(
+  hallmark_rescue_dir,
+  "\n"
+)
+
+cat(
+  "=====================================\n"
+)
+
+# ============================================================
+# 11_MTK25_GSVA_ANALYSIS
+# ============================================================
+
+suppressPackageStartupMessages({
+  
+  library(GSVA)
+  library(msigdbr)
+  
+  library(dplyr)
+  library(tidyr)
+  
+  library(ggplot2)
+  library(ggpubr)
+  library(rstatix)
+  
+  library(pheatmap)
+  
+  library(openxlsx)
+  
+})
+
+packageVersion("GSVA")
+
+gsva_dir <- file.path(
+  outdir,
+  "11_GSVA_Analysis"
+)
+
+dir.create(
+  gsva_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+# ============================================================
+# HALLMARK DATABASE
+# ============================================================
+
+hallmark_db <- msigdbr(
+  
+  species = "Mus musculus",
+  
+  category = "H"
+  
+)
+
+hallmark_list <- split(
+  
+  hallmark_db$gene_symbol,
+  
+  hallmark_db$gs_name
+  
+)
+
+cat(
+  "Hallmark pathways:",
+  length(hallmark_list),
+  "\n"
+)
+# ============================================================
+# REMOVE DUPLICATES
+# ============================================================
+
+gene_means <- rowMeans(
+  vst_mat,
+  na.rm = TRUE
+)
+
+tmp <- data.frame(
+  
+  Gene = rownames(vst_mat),
+  
+  MeanExpr = gene_means,
+  
+  RowID = seq_len(
+    nrow(vst_mat)
+  ),
+  
+  stringsAsFactors = FALSE
+  
+)
+
+tmp_unique <- tmp %>%
+  
+  group_by(Gene) %>%
+  
+  slice_max(
+    
+    MeanExpr,
+    
+    n = 1,
+    
+    with_ties = FALSE
+    
+  ) %>%
+  
+  ungroup()
+
+vst_mat_gsva <- vst_mat[
+  tmp_unique$RowID,
+  ,
+  drop = FALSE
+]
+
+rownames(vst_mat_gsva) <- tmp_unique$Gene
+
+cat(
+  "Genes before:",
+  nrow(vst_mat),
+  "\n"
+)
+
+cat(
+  "Genes after:",
+  nrow(vst_mat_gsva),
+  "\n"
+)
+
+cat(
+  "Remaining duplicates:",
+  sum(
+    duplicated(
+      rownames(vst_mat_gsva)
+    )
+  ),
+  "\n"
+)
+# ============================================================
+# GSVA 2.6.3
+# ============================================================
+
+gsva_par <- gsvaParam(
+  
+  exprData = as.matrix(
+    vst_mat_gsva
+  ),
+  
+  geneSets = hallmark_list,
+  
+  minSize = 10,
+  
+  maxSize = 500
+  
+)
+
+gsva_scores <- gsva(
+  
+  gsva_par,
+  
+  verbose = TRUE
+  
+)
+
+write.csv(
+  
+  gsva_scores,
+  
+  file.path(
+    gsva_dir,
+    "Hallmark_GSVA_Scores.csv"
+  )
+  
+)
+
+dim(gsva_scores)
+
+head(
+  rownames(gsva_scores)
+)
+# ============================================================
+# CONDITIONS
+# ============================================================
+
+sample_info$Condition <- factor(
+  
+  paste(
+    
+    sample_info$genotype,
+    
+    sample_info$treatment,
+    
+    sep = "_"
+    
+  ),
+  
+  levels = c(
+    
+    "WT_Ctrl",
+    "WT_MTK",
+    "KO_Ctrl",
+    "KO_MTK"
+    
+  )
+  
+)
+
+condition_colors <- c(
+  
+  WT_Ctrl = "#4E79A7",
+  
+  WT_MTK = "#59A14F",
+  
+  KO_Ctrl = "#E15759",
+  
+  KO_MTK = "#F28E2B"
+  
+)
+# ============================================================
+# LONG FORMAT
+# ============================================================
+
+gsva_df <- as.data.frame(
+  t(gsva_scores)
+)
+
+gsva_df$SampleID <- rownames(
+  gsva_df
+)
+
+gsva_df <- left_join(
+  
+  gsva_df,
+  
+  sample_info,
+  
+  by = "SampleID"
+  
+)
+
+hallmark_names <- rownames(
+  gsva_scores
+)
+
+gsva_long <- gsva_df %>%
+  
+  select(
+    
+    SampleID,
+    
+    Condition,
+    
+    all_of(
+      hallmark_names
+    )
+    
+  ) %>%
+  
+  pivot_longer(
+    
+    cols = all_of(
+      hallmark_names
+    ),
+    
+    names_to = "Pathway",
+    
+    values_to = "Score"
+    
+  )
+# ============================================================
+# KRUSKAL-WALLIS
+# ============================================================
+
+gsva_stats <- gsva_long %>%
+  
+  group_by(
+    Pathway
+  ) %>%
+  
+  kruskal_test(
+    Score ~ Condition
+  ) %>%
+  
+  adjust_pvalue(
+    method = "BH"
+  )
+
+write.csv(
+  
+  gsva_stats,
+  
+  file.path(
+    gsva_dir,
+    "GSVA_Pathway_Statistics.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+# ============================================================
+# HALLMARK HEATMAP
+# ============================================================
+
+sample_order <- sample_info %>%
+  
+  arrange(
+    Condition
+  ) %>%
+  
+  pull(
+    SampleID
+  )
+
+heat_mat <- gsva_scores[
+  ,
+  sample_order
+]
+
+annotation_col <- data.frame(
+  
+  Condition =
+    sample_info$Condition
+  
+)
+
+rownames(
+  annotation_col
+) <- sample_info$SampleID
+
+annotation_col <- annotation_col[
+  sample_order,
+  ,
+  drop = FALSE
+]
+
+ann_colors <- list(
+  
+  Condition =
+    condition_colors
+  
+)
+
+pheatmap(
+  
+  heat_mat,
+  
+  scale = "row",
+  
+  cluster_rows = TRUE,
+  
+  cluster_cols = FALSE,
+  
+  annotation_col =
+    annotation_col,
+  
+  annotation_colors =
+    ann_colors,
+  
+  border_color = NA,
+  
+  fontsize_row = 8,
+  
+  filename = file.path(
+    
+    gsva_dir,
+    
+    "Hallmark_GSVA_Heatmap.png"
+    
+  ),
+  
+  width = 12,
+  
+  height = 10
+  
+)
+# ============================================================
+# TOP PATHWAYS
+# ============================================================
+
+top_pathways <- gsva_stats %>%
+  
+  arrange(
+    p.adj
+  ) %>%
+  
+  slice_head(
+    n = 12
+  ) %>%
+  
+  pull(
+    Pathway
+  )
+
+top_df <- gsva_long %>%
+  
+  filter(
+    Pathway %in%
+      top_pathways
+  )
+
+p_top <- ggplot(
+  
+  top_df,
+  
+  aes(
+    
+    Condition,
+    
+    Score,
+    
+    fill = Condition
+    
+  )
+  
+) +
+  
+  geom_boxplot(
+    
+    alpha = 0.8,
+    
+    outlier.shape = NA
+    
+  ) +
+  
+  geom_jitter(
+    
+    width = 0.08,
+    
+    size = 1.8
+    
+  ) +
+  
+  scale_fill_manual(
+    values = condition_colors
+  ) +
+  
+  facet_wrap(
+    ~Pathway,
+    scales = "free_y",
+    ncol = 3
+  ) +
+  
+  theme_bw() +
+  
+  theme(
+    legend.position = "none"
+  )
+
+ggsave(
+  
+  file.path(
+    gsva_dir,
+    "Top_Hallmark_Pathways.png"
+  ),
+  
+  p_top,
+  
+  width = 14,
+  height = 10,
+  dpi = 300
+  
+)
+# ============================================================
+# PINK1 BIOLOGY
+# ============================================================
+
+key_hallmarks <- c(
+  
+  "HALLMARK_OXIDATIVE_PHOSPHORYLATION",
+  
+  "HALLMARK_REACTIVE_OXYGEN_SPECIES_PATHWAY",
+  
+  "HALLMARK_APOPTOSIS",
+  
+  "HALLMARK_INFLAMMATORY_RESPONSE",
+  
+  "HALLMARK_TNFA_SIGNALING_VIA_NFKB",
+  
+  "HALLMARK_IL6_JAK_STAT3_SIGNALING",
+  
+  "HALLMARK_MTORC1_SIGNALING",
+  
+  "HALLMARK_HYPOXIA"
+  
+)
+
+key_df <- gsva_long %>%
+  
+  filter(
+    Pathway %in%
+      key_hallmarks
+  )
+
+p_key <- ggplot(
+  
+  key_df,
+  
+  aes(
+    
+    Condition,
+    
+    Score,
+    
+    fill = Condition
+    
+  )
+  
+) +
+  
+  geom_boxplot(
+    
+    alpha = 0.8,
+    
+    outlier.shape = NA
+    
+  ) +
+  
+  geom_jitter(
+    
+    width = 0.08,
+    
+    size = 2
+    
+  ) +
+  
+  scale_fill_manual(
+    values = condition_colors
+  ) +
+  
+  facet_wrap(
+    ~Pathway,
+    scales = "free_y",
+    ncol = 2
+  ) +
+  
+  theme_classic() +
+  
+  theme(
+    legend.position = "none"
+  )
+
+ggsave(
+  
+  file.path(
+    gsva_dir,
+    "Pink1_Biology_Hallmarks.png"
+  ),
+  
+  p_key,
+  
+  width = 12,
+  height = 10,
+  dpi = 300
+  
+)
+# ============================================================
+# RESCUE ANALYSIS
+# ============================================================
+
+rescue_df_gsva <- gsva_long %>%
+  
+  group_by(
+    
+    Pathway,
+    
+    Condition
+    
+  ) %>%
+  
+  summarise(
+    
+    MeanScore =
+      mean(Score),
+    
+    .groups = "drop"
+    
+  ) %>%
+  
+  pivot_wider(
+    
+    names_from =
+      Condition,
+    
+    values_from =
+      MeanScore
+    
+  ) %>%
+  
+  mutate(
+    
+    KO_Effect =
+      KO_Ctrl -
+      WT_Ctrl,
+    
+    MTK_Effect =
+      KO_MTK -
+      KO_Ctrl,
+    
+    Opposite_Direction =
+      sign(KO_Effect) !=
+      sign(MTK_Effect),
+    
+    Rescue_Magnitude =
+      abs(KO_Effect) +
+      abs(MTK_Effect)
+    
+  )
+
+write.csv(
+  
+  rescue_df_gsva,
+  
+  file.path(
+    gsva_dir,
+    "GSVA_Pathway_Rescue.csv"
+  ),
+  
+  row.names = FALSE
+  
+)
+# ============================================================
+# RESCUE SCATTER
+# ============================================================
+
+p_rescue <- ggplot(
+  
+  rescue_df_gsva,
+  
+  aes(
+    
+    KO_Effect,
+    
+    MTK_Effect
+    
+  )
+  
+) +
+  
+  geom_hline(
+    yintercept = 0,
+    linetype = 2
+  ) +
+  
+  geom_vline(
+    xintercept = 0,
+    linetype = 2
+  ) +
+  
+  geom_point(
+    
+    aes(
+      color =
+        Opposite_Direction
+    ),
+    
+    size = 4
+    
+  ) +
+  
+  scale_color_manual(
+    
+    values = c(
+      
+      "FALSE" = "grey70",
+      
+      "TRUE" = "#E15759"
+      
+    )
+    
+  ) +
+  
+  theme_classic() +
+  
+  labs(
+    
+    title =
+      "Hallmark Pathway Rescue",
+    
+    x =
+      "KO Effect",
+    
+    y =
+      "MTK Effect"
+    
+  )
+
+ggsave(
+  
+  file.path(
+    gsva_dir,
+    "GSVA_Rescue_Scatter.png"
+  ),
+  
+  p_rescue,
+  
+  width = 8,
+  height = 6,
+  dpi = 300
+  
+)
+# ============================================================
+# TOP RESCUED HALLMARKS
+# ============================================================
+
+top_rescue <- rescue_df_gsva %>%
+  
+  filter(
+    Opposite_Direction
+  ) %>%
+  
+  arrange(
+    desc(
+      Rescue_Magnitude
+    )
+  ) %>%
+  
+  slice_head(
+    n = 20
+  )
+
+p_top_rescue <- ggplot(
+  
+  top_rescue,
+  
+  aes(
+    
+    reorder(
+      Pathway,
+      Rescue_Magnitude
+    ),
+    
+    Rescue_Magnitude
+    
+  )
+  
+) +
+  
+  geom_col(
+    fill = "#4E79A7"
+  ) +
+  
+  coord_flip() +
+  
+  theme_classic() +
+  
+  labs(
+    
+    title =
+      "Top Rescued Hallmark Pathways",
+    
+    x = NULL,
+    
+    y =
+      "Rescue Magnitude"
+    
+  )
+
+ggsave(
+  
+  file.path(
+    gsva_dir,
+    "Top_Rescued_Hallmarks.png"
+  ),
+  
+  p_top_rescue,
+  
+  width = 8,
+  height = 8,
+  dpi = 300
+  
+)
+# ============================================================
+# EXCEL REPORT
+# ============================================================
+
+wb <- createWorkbook()
+
+addWorksheet(
+  wb,
+  "GSVA_Scores"
+)
+
+writeData(
+  wb,
+  "GSVA_Scores",
+  gsva_df
+)
+
+addWorksheet(
+  wb,
+  "Statistics"
+)
+
+writeData(
+  wb,
+  "Statistics",
+  gsva_stats
+)
+
+addWorksheet(
+  wb,
+  "Rescue"
+)
+
+writeData(
+  wb,
+  "Rescue",
+  rescue_df_gsva
+)
+
+saveWorkbook(
+  
+  wb,
+  
+  file.path(
+    gsva_dir,
+    "GSVA_Report.xlsx"
+  ),
+  
+  overwrite = TRUE
+  
+)
+
+cat(
+  "\n====================================\n"
+)
+
+cat(
+  "GSVA ANALYSIS COMPLETED\n"
+)
+
+cat(
+  "====================================\n"
+)
+
+cat(
+  gsva_dir,
+  "\n"
+)
+
+cat(
+  "====================================\n"
+)
+# ============================================================
+# 12_MTK25_MITOCHONDRIAL_RESCUE_ANALYSIS
+# ============================================================
+
+suppressPackageStartupMessages({
+  
+  library(dplyr)
+  library(tidyr)
+  
+  library(ggplot2)
+  library(ggpubr)
+  library(rstatix)
+  
+  library(pheatmap)
+  
+  library(openxlsx)
+  
+})
+
+mito_dir <- file.path(
+  
+  outdir,
+  
+  "12_Mitochondrial_Rescue"
+  
+)
+
+dir.create(
+  
+  mito_dir,
+  
+  recursive = TRUE,
+  
+  showWarnings = FALSE
+  
+)
+# ============================================================
+# MITOCHONDRIAL SIGNATURES
+# ============================================================
+
+mito_signatures <- list(
+  
+  Mitophagy = c(
+    
+    "Pink1","Prkn",
+    
+    "Sqstm1","Optn",
+    
+    "Ulk1","Ulk2",
+    
+    "Map1lc3a","Map1lc3b",
+    
+    "Atg5","Atg7",
+    
+    "Bnip3","Fundc1",
+    
+    "Tbk1"
+    
+  ),
+  
+  Mito_QC = c(
+    
+    "Pink1","Prkn",
+    
+    "Pgam5",
+    
+    "Yme1l1",
+    
+    "Oma1",
+    
+    "Lonp1",
+    
+    "Clpp",
+    
+    "Hspd1",
+    
+    "Hspe1"
+    
+  ),
+  
+  OxPhos = c(
+    
+    "Ndufa1",
+    "Ndufa2",
+    
+    "Ndufb5",
+    "Ndufb8",
+    
+    "Ndufs1",
+    "Ndufs2",
+    
+    "Sdha",
+    "Sdhb",
+    
+    "Uqcrc1",
+    "Uqcrc2",
+    
+    "Cox4i1",
+    "Cox5a",
+    "Cox6a1",
+    
+    "Atp5f1a",
+    "Atp5f1b",
+    "Atp5mc1"
+    
+  ),
+  
+  Complex_I = c(
+    
+    "Ndufa1",
+    "Ndufa2",
+    
+    "Ndufb5",
+    "Ndufb8",
+    
+    "Ndufs1",
+    "Ndufs2",
+    "Ndufs7"
+    
+  ),
+  
+  ROS_Defense = c(
+    
+    "Sod1",
+    "Sod2",
+    
+    "Cat",
+    
+    "Gpx1",
+    "Gpx4",
+    
+    "Prdx1",
+    "Prdx2",
+    "Prdx3",
+    
+    "Txn1",
+    "Txn2"
+    
+  ),
+  
+  Mito_Biogenesis = c(
+    
+    "Ppargc1a",
+    
+    "Tfam",
+    
+    "Nrf1",
+    
+    "Gabpa",
+    
+    "Tfb1m",
+    
+    "Tfb2m"
+    
+  ),
+  
+  Mito_Dynamics = c(
+    
+    "Mfn1",
+    
+    "Mfn2",
+    
+    "Opa1",
+    
+    "Dnm1l",
+    
+    "Fis1",
+    
+    "Mff"
+    
+  )
+  
+)
+# ============================================================
+# SCORE SIGNATURES
+# ============================================================
+
+signature_scores <- list()
+
+signature_gene_summary <- data.frame()
+
+for(sig in names(mito_signatures)){
+  
+  genes <- mito_signatures[[sig]]
+  
+  genes_present <- rownames(vst_mat)[
+    
+    toupper(rownames(vst_mat)) %in%
+      
+      toupper(genes)
+    
+  ]
+  
+  signature_gene_summary <- rbind(
+    
+    signature_gene_summary,
+    
+    data.frame(
+      
+      Signature = sig,
+      
+      Genes_Found = length(genes_present),
+      
+      stringsAsFactors = FALSE
+      
+    )
+    
+  )
+  
+  if(length(genes_present) < 3){
+    
+    next
+    
+  }
+  
+  mat <- vst_mat[
+    genes_present,
+    ,
+    drop = FALSE
+  ]
+  
+  mat_scaled <- t(
+    
+    scale(
+      t(mat)
+    )
+    
+  )
+  
+  score <- colMeans(
+    
+    mat_scaled,
+    
+    na.rm = TRUE
+    
+  )
+  
+  signature_scores[[sig]] <- score
+  
+}
+
+write.csv(
+  
+  signature_gene_summary,
+  
+  file.path(
+    
+    mito_dir,
+    
+    "Signature_Gene_Coverage.csv"
+    
+  ),
+  
+  row.names = FALSE
+  
+)
+# ============================================================
+# BUILD TABLE
+# ============================================================
+
+mito_df <- as.data.frame(
+  
+  do.call(
+    
+    rbind,
+    
+    signature_scores
+    
+  )
+  
+)
+
+mito_df <- as.data.frame(
+  t(mito_df)
+)
+
+mito_df$SampleID <- rownames(
+  mito_df
+)
+
+mito_df <- left_join(
+  
+  mito_df,
+  
+  sample_info,
+  
+  by = "SampleID"
+  
+)
+
+mito_df$Condition <- factor(
+  
+  paste(
+    
+    mito_df$genotype,
+    
+    mito_df$treatment,
+    
+    sep = "_"
+    
+  ),
+  
+  levels = c(
+    
+    "WT_Ctrl",
+    
+    "WT_MTK",
+    
+    "KO_Ctrl",
+    
+    "KO_MTK"
+    
+  )
+  
+)
+
+write.csv(
+  
+  mito_df,
+  
+  file.path(
+    
+    mito_dir,
+    
+    "Mitochondrial_Scores.csv"
+    
+  ),
+  
+  row.names = FALSE
+  
+)
+sig_cols <- names(
+  signature_scores
+)
+
+mito_long <- mito_df %>%
+  
+  select(
+    
+    SampleID,
+    
+    Condition,
+    
+    all_of(sig_cols)
+    
+  ) %>%
+  
+  pivot_longer(
+    
+    cols = all_of(sig_cols),
+    
+    names_to = "Signature",
+    
+    values_to = "Score"
+    
+  )
+# ============================================================
+# KRUSKAL WALLIS
+# ============================================================
+
+mito_stats <- mito_long %>%
+  
+  group_by(
+    Signature
+  ) %>%
+  
+  kruskal_test(
+    
+    Score ~ Condition
+    
+  ) %>%
+  
+  adjust_pvalue(
+    method = "BH"
+  )
+
+write.csv(
+  
+  mito_stats,
+  
+  file.path(
+    
+    mito_dir,
+    
+    "Mito_Statistics.csv"
+    
+  ),
+  
+  row.names = FALSE
+  
+)
+# ============================================================
+# HEATMAP
+# ============================================================
+
+heat_mat <- as.matrix(
+  
+  mito_df %>%
+    
+    select(
+      
+      all_of(sig_cols)
+      
+    )
+  
+)
+
+rownames(heat_mat) <-
+  
+  mito_df$SampleID
+
+heat_mat <- t(heat_mat)
+
+sample_order <- mito_df %>%
+  
+  arrange(
+    Condition
+  ) %>%
+  
+  pull(
+    SampleID
+  )
+
+heat_mat <- heat_mat[
+  ,
+  sample_order
+]
+
+pheatmap(
+  
+  heat_mat,
+  
+  scale = "row",
+  
+  cluster_rows = TRUE,
+  
+  cluster_cols = FALSE,
+  
+  border_color = NA,
+  
+  color = colorRampPalette(
+    
+    c(
+      "#2166AC",
+      "white",
+      "#B2182B"
+    )
+    
+  )(100),
+  
+  filename = file.path(
+    
+    mito_dir,
+    
+    "Mitochondrial_Heatmap.png"
+    
+  ),
+  
+  width = 10,
+  
+  height = 7
+  
+)
+condition_colors <- c(
+  
+  WT_Ctrl = "#4E79A7",
+  
+  WT_MTK = "#59A14F",
+  
+  KO_Ctrl = "#E15759",
+  
+  KO_MTK = "#F28E2B"
+  
+)
+
+for(sig in unique(mito_long$Signature)){
+  
+  plot_df <- mito_long %>%
+    
+    filter(
+      Signature == sig
+    )
+  
+  p <- ggplot(
+    
+    plot_df,
+    
+    aes(
+      
+      Condition,
+      
+      Score,
+      
+      fill = Condition
+      
+    )
+    
+  ) +
+    
+    geom_boxplot(
+      
+      alpha = 0.85,
+      
+      outlier.shape = NA
+      
+    ) +
+    
+    geom_jitter(
+      
+      width = 0.08,
+      
+      size = 2.5
+      
+    ) +
+    
+    scale_fill_manual(
+      
+      values = condition_colors
+      
+    ) +
+    
+    theme_classic(
+      base_size = 14
+    ) +
+    
+    theme(
+      
+      legend.position = "none",
+      
+      axis.text.x =
+        element_text(
+          angle = 45,
+          hjust = 1
+        )
+      
+    ) +
+    
+    labs(
+      
+      title = sig,
+      
+      x = NULL,
+      
+      y = "Signature Score"
+      
+    )
+  
+  ggsave(
+    
+    file.path(
+      
+      mito_dir,
+      
+      paste0(
+        sig,
+        "_Boxplot.png"
+      )
+      
+    ),
+    
+    p,
+    
+    width = 6,
+    
+    height = 5,
+    
+    dpi = 300
+    
+  )
+  
+}
+# ============================================================
+# MITOCHONDRIAL RESCUE ANALYSIS
+# ============================================================
+
+mito_rescue <- mito_long %>%
+  
+  group_by(
+    
+    Signature,
+    Condition
+    
+  ) %>%
+  
+  summarise(
+    
+    MeanScore = mean(
+      Score,
+      na.rm = TRUE
+    ),
+    
+    SD = sd(
+      Score,
+      na.rm = TRUE
+    ),
+    
+    .groups = "drop"
+    
+  ) %>%
+  
+  pivot_wider(
+    
+    names_from = Condition,
+    
+    values_from = c(
+      MeanScore,
+      SD
+    )
+    
+  )
+
+mito_rescue <- mito_rescue %>%
+  
+  mutate(
+    
+    KO_Effect =
+      
+      MeanScore_KO_Ctrl -
+      
+      MeanScore_WT_Ctrl,
+    
+    MTK_Effect =
+      
+      MeanScore_KO_MTK -
+      
+      MeanScore_KO_Ctrl,
+    
+    WT_MTK_Effect =
+      
+      MeanScore_WT_MTK -
+      
+      MeanScore_WT_Ctrl,
+    
+    Rescue_Magnitude =
+      
+      abs(KO_Effect) +
+      
+      abs(MTK_Effect),
+    
+    Rescue_Category = case_when(
+      
+      sign(KO_Effect) != sign(MTK_Effect) &
+        abs(MTK_Effect) >= abs(KO_Effect) ~
+        
+        "Complete Rescue",
+      
+      sign(KO_Effect) != sign(MTK_Effect) &
+        abs(MTK_Effect) >= abs(KO_Effect) * 0.50 ~
+        
+        "Partial Rescue",
+      
+      TRUE ~
+        
+        "No Rescue"
+      
+    )
+    
+  )
+
+write.csv(
+  
+  mito_rescue,
+  
+  file.path(
+    
+    mito_dir,
+    
+    "Mitochondrial_Rescue.csv"
+    
+  ),
+  
+  row.names = FALSE
+  
+)
+
+print(mito_rescue)
+# ============================================================
+# RESCUE HEATMAP
+# ============================================================
+
+rescue_heat <- mito_rescue %>%
+  
+  select(
+    
+    Signature,
+    
+    KO_Effect,
+    
+    MTK_Effect,
+    
+    WT_MTK_Effect
+    
+  )
+
+rescue_mat <- as.matrix(
+  
+  rescue_heat[,-1]
+  
+)
+
+rownames(rescue_mat) <-
+  
+  rescue_heat$Signature
+
+pheatmap(
+  
+  rescue_mat,
+  
+  cluster_rows = TRUE,
+  
+  cluster_cols = FALSE,
+  
+  display_numbers = TRUE,
+  
+  fontsize_number = 10,
+  
+  color = colorRampPalette(
+    
+    c(
+      "#2166AC",
+      "white",
+      "#B2182B"
+    )
+    
+  )(100),
+  
+  filename = file.path(
+    
+    mito_dir,
+    
+    "Mitochondrial_Rescue_Heatmap.png"
+    
+  ),
+  
+  width = 7,
+  
+  height = 6
+  
+)
+# ============================================================
+# RESCUE MAGNITUDE
+# ============================================================
+
+plot_df <- mito_rescue %>%
+  
+  arrange(
+    Rescue_Magnitude
+  )
+
+p_rescue_bar <- ggplot(
+  
+  plot_df,
+  
+  aes(
+    
+    reorder(
+      Signature,
+      Rescue_Magnitude
+    ),
+    
+    Rescue_Magnitude,
+    
+    fill = Rescue_Category
+    
+  )
+  
+) +
+  
+  geom_col(
+    
+    width = 0.75
+    
+  ) +
+  
+  coord_flip() +
+  
+  scale_fill_manual(
+    
+    values = c(
+      
+      "Complete Rescue" = "#1B9E77",
+      
+      "Partial Rescue" = "#D95F02",
+      
+      "No Rescue" = "#808080"
+      
+    )
+    
+  ) +
+  
+  theme_classic(
+    base_size = 14
+  ) +
+  
+  labs(
+    
+    title =
+      "Mitochondrial Signature Rescue by MTK",
+    
+    x = NULL,
+    
+    y =
+      "Rescue Magnitude"
+    
+  )
+
+ggsave(
+  
+  file.path(
+    
+    mito_dir,
+    
+    "Mitochondrial_Rescue_Barplot.png"
+    
+  ),
+  
+  p_rescue_bar,
+  
+  width = 8,
+  
+  height = 5,
+  
+  dpi = 300
+  
+)
+# ============================================================
+# RESCUE SCATTER
+# ============================================================
+
+p_scatter <- ggplot(
+  
+  mito_rescue,
+  
+  aes(
+    
+    KO_Effect,
+    
+    MTK_Effect,
+    
+    label = Signature
+    
+  )
+  
+) +
+  
+  geom_hline(
+    
+    yintercept = 0,
+    
+    linetype = 2
+    
+  ) +
+  
+  geom_vline(
+    
+    xintercept = 0,
+    
+    linetype = 2
+    
+  ) +
+  
+  geom_point(
+    
+    aes(
+      color = Rescue_Category
+    ),
+    
+    size = 5
+    
+  ) +
+  
+  scale_color_manual(
+    
+    values = c(
+      
+      "Complete Rescue" = "#1B9E77",
+      
+      "Partial Rescue" = "#D95F02",
+      
+      "No Rescue" = "#808080"
+      
+    )
+    
+  ) +
+  
+  ggrepel::geom_text_repel(
+    
+    size = 4,
+    
+    max.overlaps = 20
+    
+  ) +
+  
+  theme_classic(
+    base_size = 14
+  ) +
+  
+  labs(
+    
+    title =
+      "MTK Rescue of Mitochondrial Signatures",
+    
+    x =
+      "KO Effect",
+    
+    y =
+      "MTK Effect"
+    
+  )
+
+ggsave(
+  
+  file.path(
+    
+    mito_dir,
+    
+    "Mitochondrial_Rescue_Scatter.png"
+    
+  ),
+  
+  p_scatter,
+  
+  width = 8,
+  
+  height = 6,
+  
+  dpi = 300
+  
+)
+# ============================================================
+# MITOCHONDRIAL VS NEUROENDOCRINE
+# ============================================================
+
+if(exists("ne_df")){
+  
+  integrated_df <- left_join(
+    
+    ne_df %>%
+      
+      select(
+        SampleID,
+        NE_Score
+      ),
+    
+    mito_df,
+    
+    by = "SampleID"
+    
+  )
+  
+  corr_mat <- cor(
+    
+    integrated_df %>%
+      
+      select(
+        where(is.numeric)
+      ),
+    
+    use =
+      "pairwise.complete.obs"
+    
+  )
+  
+  write.csv(
+    
+    corr_mat,
+    
+    file.path(
+      
+      mito_dir,
+      
+      "Mito_NE_Correlation_Matrix.csv"
+      
+    )
+    
+  )
+  
+  pheatmap(
+    
+    corr_mat,
+    
+    display_numbers = TRUE,
+    
+    color = colorRampPalette(
+      
+      c(
+        "#2166AC",
+        "white",
+        "#B2182B"
+      )
+      
+    )(100),
+    
+    filename = file.path(
+      
+      mito_dir,
+      
+      "Mito_NE_Correlation_Heatmap.png"
+      
+    ),
+    
+    width = 9,
+    
+    height = 8
+    
+  )
+  
+}
+# ============================================================
+# TOP SIGNATURE PANEL
+# ============================================================
+
+top_sigs <- c(
+  
+  "Mitophagy",
+  
+  "Mito_QC",
+  
+  "OxPhos",
+  
+  "Complex_I"
+  
+)
+
+top_panel <- mito_long %>%
+  
+  filter(
+    
+    Signature %in%
+      
+      top_sigs
+    
+  )
+
+p_top <- ggplot(
+  
+  top_panel,
+  
+  aes(
+    
+    Condition,
+    
+    Score,
+    
+    fill = Condition
+    
+  )
+  
+) +
+  
+  geom_boxplot(
+    
+    alpha = 0.85,
+    
+    outlier.shape = NA
+    
+  ) +
+  
+  geom_jitter(
+    
+    width = 0.08,
+    
+    size = 2
+    
+  ) +
+  
+  scale_fill_manual(
+    
+    values = condition_colors
+    
+  ) +
+  
+  facet_wrap(
+    
+    ~Signature,
+    
+    scales = "free_y",
+    
+    ncol = 2
+    
+  ) +
+  
+  theme_bw(
+    base_size = 13
+  ) +
+  
+  theme(
+    
+    legend.position =
+      "none",
+    
+    axis.text.x =
+      element_text(
+        angle = 45,
+        hjust = 1
+      )
+    
+  )
+
+ggsave(
+  
+  file.path(
+    
+    mito_dir,
+    
+    "Top_Mitochondrial_Signatures.png"
+    
+  ),
+  
+  p_top,
+  
+  width = 10,
+  
+  height = 8,
+  
+  dpi = 300
+  
+)
+# ============================================================
+# EXCEL REPORT
+# ============================================================
+
+wb <- createWorkbook()
+
+addWorksheet(
+  wb,
+  "Scores"
+)
+writeData(
+  wb,
+  "Scores",
+  mito_df
+)
+
+addWorksheet(
+  wb,
+  "Statistics"
+)
+writeData(
+  wb,
+  "Statistics",
+  mito_stats
+)
+
+addWorksheet(
+  wb,
+  "Rescue"
+)
+writeData(
+  wb,
+  "Rescue",
+  mito_rescue
+)
+
+if(exists("corr_mat")){
+  
+  addWorksheet(
+    wb,
+    "Correlation"
+  )
+  
+  writeData(
+    wb,
+    "Correlation",
+    corr_mat
+  )
+  
+}
+
+saveWorkbook(
+  
+  wb,
+  
+  file.path(
+    
+    mito_dir,
+    
+    "Mitochondrial_Report.xlsx"
+    
+  ),
+  
+  overwrite = TRUE
+  
+)
+
+cat(
+  "\n====================================\n"
+)
+
+cat(
+  "MITOCHONDRIAL RESCUE ANALYSIS COMPLETE\n"
+)
+
+cat(
+  "====================================\n"
+)
+
+cat(
+  mito_dir,
+  "\n"
+)
+
+cat(
+  "====================================\n"
+)
