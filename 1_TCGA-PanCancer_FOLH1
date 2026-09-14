@@ -1,4 +1,4 @@
-# 1_FOLH1 expression analysis in TCGA pan-cancer (Pan-cancer + Top10 + PRAD vs Normal)
+# FOLH1 expression analysis in TCGA pan-cancer (Pan-cancer + Top10 + PRAD vs Normal)
 
 ## setup
 base_dir <- "C:/Users/Martina/Desktop/TCGA/rawdata/0_TCGA-panCancer"
