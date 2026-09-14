@@ -14,4 +14,8 @@ The main actors in this study are MTK458, FOLH1 gene (encoding PSMA protein), PR
 ### scripts & relative aims
 
 TCGA-PAAD
-What is the role of PINK1 in pancreatic adenocarcinoma, and is PINK1 linked to neuroendocrine differentiation, specific molecular pathways, and patient outcome?
+How is FOLH1 (PSMA) expression associated with pancreatic cancer biology, tumor aggressiveness, clinical outcome, pathological progression, tumor microenvironment composition, immune infiltration, and molecular pathway activity in TCGA-PAAD?
+
+TCGA-PRAD
+How is FOLH1 (PSMA) expression associated with prostate cancer biology, tumor aggressiveness, clinical outcome, androgen receptor signaling, pathological progression, tumor microenvironment composition, immune infiltration, and molecular pathway activity in TCGA-PRAD?
+
