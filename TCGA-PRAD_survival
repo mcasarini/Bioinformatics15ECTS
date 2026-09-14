@@ -1,0 +1,227 @@
+# Survival analysis in TCGA-PRAD (501 patients: 10 deaths): Do patients with high vs low FOLH1 have different survival curves?
+
+## setup
+base_dir <- "C:/Users/Martina/Desktop/TCGA"
+out_dir  <- file.path(base_dir, "results")
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+## packages
+library(SummarizedExperiment)
+library(dplyr)
+library(survival)
+library(survminer)
+library(ggplot2)
+library(openxlsx)
+library(showtext)
+library(sysfonts)
+font_add("Arial", "C:/Windows/Fonts/arial.ttf")
+showtext_auto()
+
+## load & check raw data
+prad <- readRDS(file.path(base_dir, "TCGA_PRAD_clinical.rds"))
+expr <- assay(prad, "fpkm_uq_unstrand")
+rd <- as.data.frame(rowData(prad))
+cd <- as.data.frame(colData(prad))
+inspection_list <- list(
+  expression_assays = assayNames(prad),
+  expression_dim = dim(expr),
+  rowData_columns = colnames(rd),
+  colData_columns = colnames(cd),
+  rowData_preview = head(rd),
+  colData_preview = head(cd),
+  vital_status_table = table(cd$vital_status),
+  sample_type_table = table(cd$sample_type),
+  missing_values_colData = colSums(is.na(cd)),
+  missing_values_rowData = colSums(is.na(rd)))
+stopifnot("gene_name" %in% colnames(rd))
+stopifnot(all(colnames(expr) == rownames(cd)))
+
+## FOLH1 extraction
+folh1_idx <- which(rd$gene_name == "FOLH1")
+if(length(folh1_idx) == 0){
+  stop("FOLH1 not found.")}
+if(length(folh1_idx) > 1){
+  warning("Multiple FOLH1 entries found; using first.")}
+folh1 <- as.numeric(expr[folh1_idx[1], ])
+folh1_info <- rd[folh1_idx[1], c("gene_id","gene_name","gene_type")]
+
+## survival variables
+OS_time <- ifelse( cd$vital_status == "Dead", cd$days_to_death, cd$days_to_last_follow_up ) 
+OS_event <- ifelse( cd$vital_status == "Dead", 1, 0 )
+
+## build dataframe
+df <- data.frame(
+  FOLH1 = folh1,
+  OS_time = OS_time,
+  OS_event = OS_event,
+  sample_type = cd$sample_type)
+df <- df %>%
+  filter(
+    sample_type == "Primary Tumor",
+    !is.na(FOLH1),
+    !is.na(OS_time),
+    !is.na(OS_event))
+df$logFOLH1 <- log2(df$FOLH1 + 1)
+df$FOLH1_group <- factor(
+  ifelse(df$FOLH1 >= median(df$FOLH1, na.rm = TRUE), "High", "Low"),
+  levels = c("Low", "High"))
+cat("Patients:", nrow(df), "\n")
+cat("Deaths:", sum(df$OS_event), "\n")
+if(sum(df$OS_event) < 20){
+  warning("Low number of events → survival analysis underpowered")}
+
+## survival
+surv_obj <- Surv(df$OS_time, df$OS_event)
+
+## significance function
+get_sig <- function(p){
+  if(is.na(p)) return(NA)
+  else if(p < 0.0001) return("****")
+  else if(p < 0.001) return("***")
+  else if(p < 0.01) return("**")
+  else if(p < 0.05) return("*")
+  else return("ns")}
+
+## Cox model
+cox_cont <- coxph(surv_obj ~ logFOLH1, data = df)
+cox_cont_sum <- summary(cox_cont)
+cox_cont_results <- data.frame(
+  HR = cox_cont_sum$coefficients[, "exp(coef)"],
+  lower95 = cox_cont_sum$conf.int[, "lower .95"],
+  upper95 = cox_cont_sum$conf.int[, "upper .95"],
+  p_value = cox_cont_sum$coefficients[, "Pr(>|z|)"])
+cox_cont_results$significance <- sapply(cox_cont_results$p_value, get_sig)
+cox_group <- coxph(surv_obj ~ FOLH1_group, data = df)
+cox_group_sum <- summary(cox_group)
+cox_group_results <- data.frame(
+  HR = cox_group_sum$coefficients[, "exp(coef)"],
+  lower95 = cox_group_sum$conf.int[, "lower .95"],
+  upper95 = cox_group_sum$conf.int[, "upper .95"],
+  p_value = cox_group_sum$coefficients[, "Pr(>|z|)"])
+cox_group_results$significance <- sapply(cox_group_results$p_value, get_sig)
+
+## Kaplan-Meier 
+fit <- survfit(surv_obj ~ FOLH1_group, data = df)
+surv_diff <- survdiff(surv_obj ~ FOLH1_group, data = df)
+km_p <- 1 - pchisq(surv_diff$chisq, df = 1)
+HR  <- round(cox_group_sum$coefficients[, "exp(coef)"], 2)
+LCL <- round(cox_group_sum$conf.int[, "lower .95"], 2)
+UCL <- round(cox_group_sum$conf.int[, "upper .95"], 2)
+subtitle_text <- paste0(
+  "Hazard ratio = ", HR,
+  " (95% CI ", LCL, "–", UCL, "); ",
+  "Log-rank p = ", signif(km_p, 3))
+km_plot <- ggsurvplot(
+  fit,
+  data = df,
+  risk.table = TRUE,
+  risk.table.height = 0.24,
+  conf.int = FALSE,
+  censor = TRUE,
+  censor.shape = 3,
+  censor.size = 2.5,
+  pval = FALSE,
+  palette = c("#4D4D4D", "#C00000"),
+  legend.title = "FOLH1 expression",
+  legend.labs = c(
+    "Low (median split)",
+    "High (median split)"),
+  xlab = "Time (days)",
+  ylab = "Overall survival probability",
+  break.time.by = 365,
+  ggtheme = theme_classic(base_size = 16),
+  tables.theme = theme_cleantable(),
+  risk.table.y.text = FALSE,
+  risk.table.fontsize = 4)
+km_plot$plot <- km_plot$plot +
+  labs(
+    title = "Overall survival according to FOLH1 expression in TCGA-PRAD",
+    subtitle = subtitle_text) +
+  coord_cartesian(ylim = c(0.60, 1.00)) +
+  theme(
+    plot.title = element_text(
+      face = "bold",
+      size = 18,
+      hjust = 0.5),
+    plot.subtitle = element_text(
+      size = 13,
+      hjust = 0.5),
+    axis.title = element_text(size = 15),
+    axis.text = element_text(size = 13),
+    legend.position = "top",
+    legend.title = element_text(size = 13),
+    legend.text = element_text(size = 12))
+pdf(file.path(out_dir, "TCGA_PRAD_FOLH1_KM.pdf"), width = 10, height = 8)
+print(km_plot)
+dev.off()
+ggsave(
+  filename = file.path(out_dir, "5_TCGA-PRAD_FOLH1_KaplanMeier.pdf"),
+  plot = km_plot$plot,
+  width = 10,
+  height = 7)
+
+## summary
+wb <- createWorkbook()
+dataset_summary <- data.frame(
+  n_patients = nrow(df),
+  n_events = sum(df$OS_event),
+  n_censored = sum(df$OS_event == 0),
+  event_rate_percent = round(mean(df$OS_event) * 100, 2),
+  median_followup_days = median(df$OS_time),
+  median_FOLH1 = median(df$FOLH1),
+  median_logFOLH1 = median(df$logFOLH1))
+group_summary <- df %>%
+  group_by(FOLH1_group) %>%
+  summarise(
+    n = n(),
+    events = sum(OS_event),
+    censored = sum(OS_event == 0),
+    event_rate = round(mean(OS_event) * 100, 2),
+    median_FOLH1 = median(FOLH1),
+    median_OS_time = median(OS_time),
+    .groups = "drop")
+inspection_df <- data.frame(
+  metric = c(
+    "Total samples",
+    "Primary tumor samples",
+    "Deaths",
+    "Censored",
+    "Median survival (days)"),
+  value = c(
+    nrow(cd),
+    sum(cd$sample_type == "Primary Tumor"),
+    sum(OS_event),
+    sum(OS_event == 0),
+    median(OS_time)))
+logrank_df <- data.frame(
+  chi_square = surv_diff$chisq,
+  df = 1,
+  p_value = km_p,
+  significance = get_sig(km_p))
+analysis_note <- data.frame(
+  note = paste0(
+    "TCGA-PRAD survival analysis includes ",
+    nrow(df),
+    " patients with ",
+    sum(df$OS_event),
+    " death events. Analysis is exploratory due to low event rate."))
+addWorksheet(wb, "Dataset_Summary")
+writeData(wb, "Dataset_Summary", dataset_summary)
+addWorksheet(wb, "Group_Summary")
+writeData(wb, "Group_Summary", group_summary)
+addWorksheet(wb, "FOLH1_Info")
+writeData(wb, "FOLH1_Info", folh1_info)
+addWorksheet(wb, "Inspection")
+writeData(wb, "Inspection", inspection_df)
+addWorksheet(wb, "Cox_Continuous")
+writeData(wb, "Cox_Continuous", cox_cont_results)
+addWorksheet(wb, "Cox_Group")
+writeData(wb, "Cox_Group", cox_group_results)
+addWorksheet(wb, "LogRank")
+writeData(wb, "LogRank", logrank_df)
+addWorksheet(wb, "Note")
+writeData(wb, "Note", analysis_note)
+saveWorkbook(
+  wb,
+  file.path(out_dir, "5_TCGA-PRAD_FOLH1_Survival_Summary.xlsx"),
+  overwrite = TRUE)
