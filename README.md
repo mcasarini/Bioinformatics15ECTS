@@ -2,7 +2,6 @@
 author: *Martina Casarini*
 
 ## General information
-### biological importance
 The main actors in this study are PINK1 (PTEN-induced kinase 1) and MTK458 (PINK1-activator) in PAAD (pancreatic adenocarcinoma) and FOLH1 gene (encoding PSMA protein) in PRAD (prostate adenocarcinoma). 
 
 **PAAD** is one of the most lethal cancers, characterized by poor prognosis and limited therapeutic options. Increasing evidence suggests that metabolic adaptation, mitochondrial quality control, and cellular plasticity contribute to tumor progression and therapy resistance.
