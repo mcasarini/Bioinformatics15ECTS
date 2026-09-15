@@ -2,9 +2,6 @@
 author: *Martina Casarini*
 
 ## General information
-I started with the study of TCGA-PanCancer cohort in R to understand the properties of the different cancer types focusing on FOLH1 gene (encoding PSMA protein). Then, I have deepened the analysis in TCGA-PAAD and TCGA-PRAD. The core of the analysis was made on real samples using syngeneic mice tumour data named MTK25. 
-In the recorded presentation I am presenting the "MTK25" mice tumour-related results compared to TCGA-PAAD cohort. 
-
 ### syngeneic mice tumour data "MTK25" scheme
 <img width="624" height="285" alt="image" src="https://github.com/user-attachments/assets/2d28f16b-48c6-4aaa-8ef2-0124ed24c5d6" />
 
@@ -15,8 +12,9 @@ The main actors in this study are PINK1 (PTEN-induced kinase 1) and MTK458 (PINK
 A key regulator of mitochondrial homeostasis is **PINK1**, a kinase that initiates mitophagy, the selective removal of damaged mitochondria. Since metabolic rewiring and mitochondrial dysfunction are hallmarks of cancer, alterations in PINK1 signaling may influence tumor behavior, cellular plasticity, and disease progression. To investigate this pathway pharmacologically, the effects of **MTK458**, a small-molecule activator of PINK1, were studied in mice syngeneic tumour models. MTK458 provides a tool to directly activate the PINK1 pathway and assess how modulation of mitochondrial quality-control mechanisms affects global gene-expression programs in pancreatic cancer.
 In parallel, **FOLH1** (folate hydrolase 1), which encodes the prostate-specific membrane antigen (PSMA), was investigated in **PRAD**, the most common prostate cancer subtype known for its tumor aggressiveness and molecular heterogeneity. FOLH1 is clinically important because PSMA is widely used as a diagnostic imaging target and an emerging therapeutic target in prostate cancer. Furthermore, variation in FOLH1 expression has been associated with tumor heterogeneity, disease progression, and clinically relevant molecular subtypes.
 
-In this study, FOLH1 was evaluated as a potential marker associated with MTK458-responsive transcriptional changes and neuroendocrine-like phenotypes.
-The objective of this work was to investigate the clinical relevance of PINK1 in human PAAD and to determine how pharmacological activation of PINK1 by MTK458 influences gene expression, inflammatory signaling, tumor microenvironment remodeling, and neuroendocrine-associated programs in a mouse pancreatic cancer model.
+### aims
+I started with the study of TCGA-PanCancer cohort in R to understand the properties of the different cancer types focusing on FOLH1 gene (encoding PSMA protein). Then, I have deepened the analysis in TCGA-PAAD and TCGA-PRAD. The core of the analysis was made on real samples using syngeneic mice tumour data named MTK25. 
+In the recorded presentation I am presenting the "MTK25" mice tumour-related results compared to TCGA-PAAD cohort. 
 
 ### scripts & relative aims
 
