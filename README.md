@@ -22,10 +22,10 @@ I started with the study of TCGA-PanCancer cohort in R focusing on FOLH1 gene to
 In the recorded presentation I am presenting the  mice tumour-related results compared to TCGA-PAAD cohort. 
 
 #### objectives
-- Characterize FOLH1 expression across human cancers using TCGA-PanCancer cohort.
-- Investigate the biological relevance of PINK1 in PAAD and FOLH1 in PRAD using the respective TCGA cohorts.
-- Analyze transcriptomic changes induced by MTK458 in syngeneic mouse PAAD tumors.
-- Identify molecular pathways in PAAD altered by MTK458 treatment (mitophagy, mitochondrial function, immune signalling and tumor microenvironment regulation).
+- Characterize FOLH1 expression across human cancers using TCGA-PanCancer cohort;
+- Investigate the biological relevance of PINK1 in PAAD and FOLH1 in PRAD using the respective TCGA cohorts;
+- Analyze transcriptomic changes induced by MTK458 in syngeneic mouse PAAD tumors;
+- Identify molecular pathways in PAAD altered by MTK458 treatment (mitophagy, mitochondrial function, immune signalling and tumor microenvironment regulation);
 - Evaluate neuroendocrine-associated gene programs and potential biomarkers associated with PINK1 activation in PAAD.
 
 ### syngeneic mice tumour data "MTK25" scheme 
