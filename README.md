@@ -9,11 +9,22 @@ A key regulator of mitochondrial homeostasis is **PINK1**, a kinase that initiat
 In parallel, **FOLH1** (folate hydrolase 1), which encodes the prostate-specific membrane antigen (PSMA), was investigated in **PRAD**, the most common prostate cancer subtype known for its tumor aggressiveness and molecular heterogeneity. FOLH1 is clinically important because PSMA is widely used as a diagnostic imaging target and an emerging therapeutic target in prostate cancer. Furthermore, variation in FOLH1 expression has been associated with tumor heterogeneity, disease progression, and clinically relevant molecular subtypes.
 
 ### workflow
-I started with the study of TCGA-PanCancer cohort in R focusing on FOLH1 gene to understand how this gene is expressed across all cancer types. Then, I have deepened the analysis in TCGA-PAAD and TCGA-PRAD specifically to understand the clinical and biological relevance of PINK1 in PAAD and the role of FOLH1 in PRAD through expression, clinicopathological, pathway and tumour microenvironment analyses. Having done this preliminary investigation, I moved to the core of this project: transcriptomic analysis of a syngeneic mouse tumor model treated with the PINK1 activator MTK458 (MTK25). 
+I started with the study of TCGA-PanCancer cohort in R focusing on FOLH1 gene to understand how this gene is expressed across all cancer types. Then, I have deepened the analysis in TCGA-PAAD and TCGA-PRAD specifically to understand the clinical and biological relevance of PINK1 in PAAD and the role of FOLH1 in PRAD through expression, clinicopathological, pathway and tumour microenvironment analyses. Having done this preliminary investigation, I moved to the core of this project: transcriptomic analysis of a syngeneic mouse tumor model treated with the PINK1 activator MTK458 (MTK25). Here I performed biomarker analysis of a predefined gene set identified thanks to a discussion with a pathologist. The analysis of MTK25 dataset includes:
+- biomarker analysis of a predefined gene set identified thanks to a discussion with a pathologist;
+- functional enrichment analysis (KEGG pathways, GO biological process, Reactome pathways and Hallmark GSEA);
+- MTK458-mediated rescue analysis at gene level and pathway level;
+- neuroendocrine signature scoring and correlation of neuroendocrine programs with PINK1;
+- cell-type signature analysis;
+- Hallmark pathway activity by GSVA;
+- mitochondrial and mitophagy signature analysis.
+
+
 In the recorded presentation I am presenting the  mice tumour-related results compared to TCGA-PAAD cohort. 
 
 ### syngeneic mice tumour data "MTK25" scheme
 <img width="624" height="285" alt="image" src="https://github.com/user-attachments/assets/2d28f16b-48c6-4aaa-8ef2-0124ed24c5d6" />
+
+### neuroendocrine gene list
 
 
 ### scripts & relative aims
