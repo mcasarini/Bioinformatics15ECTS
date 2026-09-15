@@ -28,10 +28,10 @@ In the recorded presentation I am presenting the  mice tumour-related results co
 - Identify molecular pathways in PAAD altered by MTK458 treatment (mitophagy, mitochondrial function, immune signalling and tumor microenvironment regulation).
 - Evaluate neuroendocrine-associated gene programs and potential biomarkers associated with PINK1 activation in PAAD.
 
-### syngeneic mice tumour data "MTK25" scheme
+### syngeneic mice tumour data "MTK25" scheme 
 <img width="624" height="285" alt="image" src="https://github.com/user-attachments/assets/2d28f16b-48c6-4aaa-8ef2-0124ed24c5d6" />
 
-### neuroendocrine gene list
+### neuroendocrine gene list 
 **Secretory/neuroendocrine markers**
 - Chga
 - Chgb
