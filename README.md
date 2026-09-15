@@ -30,21 +30,3 @@ In the recorded presentation I am presenting the  mice tumour-related results co
 
 ### syngeneic mice tumour data "MTK25" scheme 
 <img width="624" height="285" alt="image" src="https://github.com/user-attachments/assets/2d28f16b-48c6-4aaa-8ef2-0124ed24c5d6" />
-
-### neuroendocrine gene list 
-**Secretory/neuroendocrine markers**
-- Chga
-- Chgb
-- Scg2
-- Scg3
-
-**Neuroendocrine differentiation markers**
-- Insm1
-- Syp
-- Ncam1
-- Eno2
-
-**Lineage and developmental regulators**
-- Foxa2
-- Sox2
-- Mycn
