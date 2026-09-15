@@ -11,6 +11,7 @@ A key regulator of mitochondrial homeostasis is **PINK1**, a kinase that initiat
 
 ### workflow
 I started with the study of TCGA-PanCancer cohort in R focusing on FOLH1 gene to understand how this gene is expressed across all cancer types. Then, I have deepened the analysis in TCGA-PAAD and TCGA-PRAD specifically to understand the clinical and biological relevance of PINK1 in PAAD and the role of FOLH1 in PRAD through expression, clinicopathological, pathway and tumour microenvironment analyses. Having done this preliminary investigation, I moved to the core of this project: transcriptomic analysis of a syngeneic mouse pancreatic tumor model treated with MTK458 (called MTK25 dataset). 
+
 The analysis of MTK25 dataset includes:
 - biomarker analysis of a predefined gene set identified thanks to a discussion with a pathologist;
 - functional enrichment analysis (KEGG pathways, GO biological process, Reactome pathways and Hallmark GSEA);
