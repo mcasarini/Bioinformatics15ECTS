@@ -35,18 +35,13 @@ In the recorded presentation I am presenting the  mice tumour-related results co
 
 
 ### scripts & relative aims
-
-- **TCGA-PAAD**:
-How is FOLH1 (PSMA) expression associated with pancreatic cancer biology, tumor aggressiveness, clinical outcome, pathological progression, tumor microenvironment composition, immune infiltration, and molecular pathway activity in TCGA-PAAD?
-
-- **TCGA-PRAD**:
-How is FOLH1 (PSMA) expression associated with prostate cancer biology, tumor aggressiveness, clinical outcome, androgen receptor signaling, pathological progression, tumor microenvironment composition, immune infiltration, and molecular pathway activity in TCGA-PRAD?
-
 - **TCGA-PanCancer**:
 How does FOLH1 (PSMA) expression vary across human cancers, and how does prostate adenocarcinoma (TCGA-PRAD) compare with other tumor types and normal prostate tissue?
-
+- **TCGA-PAAD**:
+How is FOLH1 (PSMA) expression associated with pancreatic cancer biology, tumor aggressiveness, clinical outcome, pathological progression, tumor microenvironment composition, immune infiltration, and molecular pathway activity in TCGA-PAAD?
+- **TCGA-PRAD**:
+How is FOLH1 (PSMA) expression associated with prostate cancer biology, tumor aggressiveness, clinical outcome, androgen receptor signaling, pathological progression, tumor microenvironment composition, immune infiltration, and molecular pathway activity in TCGA-PRAD?
 - **miceRNASeq_check & DESeq2**:
 Which genes change expression between experimental conditions, treatments, genotypes, and PINK1 overexpression in several mouse studies?
-
 - **miceRNASeq_MTK25**:
 How does PINK1 deficiency (KO) alter transcriptional programs, neuroendocrine identity, cell-type composition, mitochondrial biology, biomarker expression, and biological pathways, and to what extent can MTK458 treatment rescue these molecular abnormalities?
