@@ -19,7 +19,7 @@ I started with the study of TCGA-PanCancer cohort in R focusing on FOLH1 gene to
 - Hallmark pathway activity by GSVA;
 - mitochondrial and mitophagy signature analysis.
 
-In the recorded presentation I am presenting the  mice tumour-related results compared to TCGA-PAAD cohort. 
+In the recorded presentation I am presenting the mice tumour-related results compared to TCGA-PAAD cohort. 
 
 #### objectives
 - Characterize FOLH1 expression across human cancers using TCGA-PanCancer cohort;
