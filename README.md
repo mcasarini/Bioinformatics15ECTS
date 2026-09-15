@@ -10,6 +10,7 @@ In the recorded presentation I am presenting the "MTK25" mice tumour-related res
 
 ### biological importance
 The main actors in this study are MTK458 and PINK1 (PTEN-induced kinase 1) in PAAD (pancreatic adenocarcinoma) and FOLH1 gene (encoding PSMA protein) in PRAD (prostate adenocarcinoma). 
+
 **PAAD** is one of the most lethal cancers, characterized by poor prognosis and limited therapeutic options. Increasing evidence suggests that metabolic adaptation, mitochondrial quality control, and cellular plasticity contribute to tumor progression and therapy resistance.
 A key regulator of mitochondrial homeostasis is PINK1, a kinase that initiates mitophagy, the selective removal of damaged mitochondria. Analysis of TCGA-PAAD data shows that high PINK1 expression is associated with a distinct and more aggressive tumor subtype displaying neuronal and neuroendocrine-like transcriptional features.
 MTK458 is a small-molecule activator of PINK1 that stabilizes its active form and enhances PINK1/Parkin-mediated mitophagy. Although originally developed for neurodegenerative diseases, its effects on pancreatic tumor biology remain largely unexplored.
