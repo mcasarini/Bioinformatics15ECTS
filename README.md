@@ -21,7 +21,7 @@ The analysis of MTK25 dataset includes:
 - Hallmark pathway activity by GSVA;
 - mitochondrial and mitophagy signature analysis.
 
-In the recorded presentation I am presenting the mice tumour-related results (PIP5K1A*WT ) compared to TCGA-PAAD cohort. 
+In the recorded presentation I am presenting the mice tumour-related results (syngeneic mice PAAD tumour PIP5K1A^WT mRNA data ) compared to TCGA-PAAD cohort. 
 
 ### objectives
 - Characterize FOLH1 expression across human cancers using TCGA-PanCancer cohort;
