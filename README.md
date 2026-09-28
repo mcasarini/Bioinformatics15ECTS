@@ -1,4 +1,4 @@
-# Practice in Bioinformatics 15ECTS / 5MO0H
+# Practice in Bioinformatics 15ECTS / 5MO00H
 author: *Martina Casarini*
 
 ## General information
